@@ -970,6 +970,27 @@
           '<div class="stop-desc-reason">'+escapeHtml(emp.workStop.reason)+'</div>'+
           '<div class="stop-desc-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(stopDateStr)+'</div>';
         panel.appendChild(stopDesc);
+      } else {
+        var stopActionBox = document.createElement("div");
+        stopActionBox.className = "stop-work-box";
+        var stopActionBtn = document.createElement("button");
+        stopActionBtn.className = "btn danger";
+        stopActionBtn.style.width = "100%";
+        stopActionBtn.style.padding = "16px";
+        stopActionBtn.style.fontSize = "16px";
+        stopActionBtn.textContent = "⛔ СТОП — приостановить все виды работ";
+        stopActionBtn.addEventListener("click", async function(){
+          var who = prompt("ФИО приостанавливающего работы:");
+          if (!who || !who.trim()) { showToast("Пожалуйста, укажите ФИО приостанавливающего работы.", true); return; }
+          var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
+          if (!reason || !reason.trim()) return;
+          await mutateAndSave(function(){
+            emp.workStop = { active: true, reason: reason.trim(), stoppedBy: who.trim(), date: new Date().toISOString() };
+          });
+          renderCheck();
+        });
+        stopActionBox.appendChild(stopActionBtn);
+        panel.appendChild(stopActionBox);
       }
     }
   }
@@ -1537,9 +1558,9 @@
           stopBtn.className = "btn danger small";
           stopBtn.textContent = "Остановить работы (нарушение СИЗ / опасные условия)";
           stopBtn.addEventListener("click", async function(){
+            var who = prompt("ФИО приостанавливающего работы:");
             var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
             if (!reason || !reason.trim()) return;
-            var who = prompt("Кто останавливает работы (ФИО/должность):");
             await mutateAndSave(function(){
               emp.workStop = { active: true, reason: reason.trim(), stoppedBy: who ? who.trim() : "", date: new Date().toISOString() };
             });
