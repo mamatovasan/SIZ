@@ -415,12 +415,21 @@
     }
   }
 
+  var lastSaveError = "";
+  function describeError(e){
+    if (!e) return "неизвестная ошибка";
+    if (typeof e === "string") return e;
+    if (e.message) return e.message + (e.details ? " (" + e.details + ")" : "");
+    try { return JSON.stringify(e); } catch(_e) { return String(e); }
+  }
+
   async function saveData(){
     try {
       var result = await kvSet(DATA_KEY, JSON.stringify(data));
       return !!result;
     } catch(e){
-      console.error("Ошибка сохранения", e);
+      lastSaveError = describeError(e);
+      console.error("Ошибка сохранения:", lastSaveError, e);
       return false;
     }
   }
@@ -433,7 +442,7 @@
     var ok = await saveData();
     if (!ok) {
       data = JSON.parse(snapshot);
-      showToast("Не удалось сохранить изменения. Проверьте интернет-соединение и повторите.", true);
+      showToast("Не удалось сохранить изменения: " + lastSaveError, true);
       return false;
     }
     showToast("Сохранено", false);
