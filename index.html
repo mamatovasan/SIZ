@@ -115,11 +115,46 @@
   td{padding:10px 10px;border-bottom:1px solid var(--line);font-size:14.5px;}
   tr.row-danger td{background:var(--danger-bg);}
   tr.row-danger td:first-child{box-shadow:inset 4px 0 0 var(--danger);}
+  tr.row-warn td{background:var(--warn-bg);}
+  tr.row-warn td:first-child{box-shadow:inset 4px 0 0 var(--warn);}
+  tr.row-ok td{background:var(--ok-bg);}
+  tr.row-ok td:first-child{box-shadow:inset 4px 0 0 var(--ok);}
   .badge{display:inline-block;padding:4px 10px;font-size:12.5px;font-weight:700;}
   .badge.ok{background:var(--ok-bg);color:var(--ok);}
   .badge.warn{background:var(--warn-bg);color:var(--warn);}
   .badge.danger{background:var(--danger-bg);color:var(--danger);}
   .badge.none{background:var(--none-bg);color:var(--none);}
+
+  .siz-card-list{display:flex;flex-direction:column;gap:10px;margin-top:6px;}
+  .siz-card{border:2px solid var(--line-strong);padding:14px 16px;background:#fff;}
+  .siz-card.ok{background:var(--ok-bg);border-color:var(--ok);}
+  .siz-card.warn{background:var(--warn-bg);border-color:var(--warn);}
+  .siz-card.danger{background:var(--danger-bg);border-color:var(--danger);}
+  .siz-card.none{background:var(--none-bg);border-color:var(--none);}
+  .siz-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .siz-card-name{font-weight:700;font-size:15.5px;}
+  .siz-card-meta{font-size:13px;color:var(--ink-soft);margin-top:6px;line-height:1.5;}
+  .siz-card-meta b{color:var(--ink);font-weight:700;}
+  .siz-card-status{font-weight:800;font-size:13.5px;white-space:nowrap;padding:5px 10px;flex-shrink:0;}
+  .siz-card-status.ok{background:var(--ok);color:#fff;}
+  .siz-card-status.warn{background:var(--warn);color:#fff;}
+  .siz-card-status.danger{background:var(--danger);color:#fff;}
+  .siz-card-status.none{background:var(--none);color:#fff;}
+
+  @media (max-width:640px){
+    #app{padding:0 12px 60px;}
+    .topbar{padding:18px 0 14px;margin-bottom:18px;gap:10px;}
+    .brand-mark{font-size:22px;padding:3px 8px;}
+    .brand-sub{font-size:12px;}
+    .tab{padding:9px 12px;font-size:13px;}
+    .panel{padding:16px;}
+    .grid-buttons{grid-template-columns:1fr;}
+    .qr-list{grid-template-columns:1fr;}
+    .person-name{font-size:18px;}
+    input[type=text],input[type=date],input[type=number],input[type=password],select{font-size:16px;}
+    .row{flex-direction:column;align-items:stretch;}
+    .row .btn{width:100%;}
+  }
 
   .empty{color:var(--ink-soft);font-size:14.5px;padding:10px 0;}
   .hint{color:var(--ink-soft);font-size:13.5px;margin-top:4px;}
@@ -242,6 +277,14 @@
   var adminUnlocked = false;
   var check = { step: 1, empDeptId: null, empId: null, deptFilter: null };
   var adminOpen = {}; // deptId -> bool
+  var bulkState = {}; // deptId -> { category, date, selected: {empId:true} }
+
+  function getBulk(deptId){
+    if (!bulkState[deptId]) {
+      bulkState[deptId] = { category: SIZ_CATALOG[0].id, date: todayISO(), selected: {} };
+    }
+    return bulkState[deptId];
+  }
 
   function uid(){ return Math.random().toString(36).slice(2,10); }
 
@@ -582,24 +625,27 @@
         '</div>';
       panel.appendChild(card);
 
-      var table = document.createElement("table");
-      table.innerHTML = '<thead><tr><th>Средство защиты</th><th>Периодичность</th><th>Дата испытания</th><th>Следующая проверка</th><th>Статус</th></tr></thead>';
-      var tbody = document.createElement("tbody");
+      var list = document.createElement("div");
+      list.className = "siz-card-list";
       SIZ_CATALOG.forEach(function(cat){
         var rec = emp.equipment[cat.id];
         var testDate = rec && rec.testDate ? rec.testDate : null;
         var st = statusForDate(testDate, cat.months);
-        var tr = document.createElement("tr");
-        if (st.code === "danger") tr.className = "row-danger";
-        tr.innerHTML = '<td>'+escapeHtml(cat.name)+'</td>'+
-          '<td>'+cat.months+' мес.</td>'+
-          '<td>'+(testDate ? fmtDate(testDate) : '—')+'</td>'+
-          '<td>'+(st.next ? fmtDate(st.next) : '—')+'</td>'+
-          '<td><span class="badge '+st.code+'">'+st.label+'</span></td>';
-        tbody.appendChild(tr);
+        var cardEl = document.createElement("div");
+        cardEl.className = "siz-card " + st.code;
+        cardEl.innerHTML =
+          '<div class="siz-card-top">'+
+            '<div class="siz-card-name">'+escapeHtml(cat.name)+'</div>'+
+            '<div class="siz-card-status '+st.code+'">'+st.label+'</div>'+
+          '</div>'+
+          '<div class="siz-card-meta">'+
+            'Периодичность: <b>'+cat.months+' мес.</b><br>'+
+            'Дата испытания: <b>'+(testDate ? fmtDate(testDate) : '—')+'</b><br>'+
+            'Следующая проверка: <b>'+(st.next ? fmtDate(st.next) : '—')+'</b>'+
+          '</div>';
+        list.appendChild(cardEl);
       });
-      table.appendChild(tbody);
-      panel.appendChild(table);
+      panel.appendChild(list);
     }
   }
 
@@ -794,6 +840,100 @@
       addEmpBox.appendChild(addEmpRow);
       body.appendChild(addEmpBox);
 
+      if (dept.employees.length > 0) {
+        var bulk = getBulk(dept.id);
+        var bulkBox = document.createElement("div");
+        bulkBox.className = "panel";
+        bulkBox.style.marginBottom = "16px";
+        bulkBox.style.background = "var(--bg)";
+
+        var bulkTitle = document.createElement("div");
+        bulkTitle.innerHTML = '<label style="margin-bottom:6px;">Массовая простановка даты проверки СИЗ</label>'+
+          '<p class="hint" style="margin-bottom:10px;">Отметьте галочками сотрудников (или выберите всех и уберите лишних), выберите СИЗ и дату испытания, затем нажмите «Проставить».</p>';
+        bulkBox.appendChild(bulkTitle);
+
+        var bulkRow = document.createElement("div");
+        bulkRow.className = "row";
+
+        var catField = document.createElement("div");
+        catField.className = "field";
+        catField.style.marginBottom = "0";
+        catField.style.minWidth = "260px";
+        catField.innerHTML = '<label>Средство защиты</label>';
+        var catSelect = document.createElement("select");
+        catSelect.style.width = "100%";
+        SIZ_CATALOG.forEach(function(cat){
+          var opt = document.createElement("option");
+          opt.value = cat.id;
+          opt.textContent = cat.name;
+          if (cat.id === bulk.category) opt.selected = true;
+          catSelect.appendChild(opt);
+        });
+        catSelect.addEventListener("change", function(){ bulk.category = catSelect.value; });
+        catField.appendChild(catSelect);
+        bulkRow.appendChild(catField);
+
+        var dateField = document.createElement("div");
+        dateField.className = "field";
+        dateField.style.marginBottom = "0";
+        dateField.innerHTML = '<label>Дата испытания</label>';
+        var bulkDateInput = document.createElement("input");
+        bulkDateInput.type = "date";
+        bulkDateInput.value = bulk.date;
+        bulkDateInput.addEventListener("change", function(){ bulk.date = bulkDateInput.value; });
+        dateField.appendChild(bulkDateInput);
+        bulkRow.appendChild(dateField);
+
+        var bulkSelCount = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; }).length;
+        var applyBulkBtn = document.createElement("button");
+        applyBulkBtn.className = "btn accent";
+        applyBulkBtn.textContent = "Проставить дату выбранным (" + bulkSelCount + ")";
+        applyBulkBtn.disabled = bulkSelCount === 0 || !bulk.date;
+        applyBulkBtn.addEventListener("click", async function(){
+          if (!bulk.date) return;
+          var ids = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; });
+          if (ids.length === 0) return;
+          await mutateAndSave(function(){
+            ids.forEach(function(id){
+              var e = getEmp(dept, id);
+              if (e) e.equipment[bulk.category] = { testDate: bulk.date };
+            });
+          });
+          bulk.selected = {};
+          renderAdmin();
+        });
+        bulkRow.appendChild(applyBulkBtn);
+        bulkBox.appendChild(bulkRow);
+
+        var selectAllWrap = document.createElement("label");
+        selectAllWrap.style.display = "flex";
+        selectAllWrap.style.alignItems = "center";
+        selectAllWrap.style.gap = "8px";
+        selectAllWrap.style.marginTop = "12px";
+        selectAllWrap.style.fontWeight = "600";
+        selectAllWrap.style.fontSize = "13.5px";
+        selectAllWrap.style.cursor = "pointer";
+        var selectAllCb = document.createElement("input");
+        selectAllCb.type = "checkbox";
+        var allChecked = dept.employees.every(function(e){ return !!bulk.selected[e.id]; });
+        selectAllCb.checked = allChecked;
+        selectAllCb.addEventListener("change", function(){
+          if (selectAllCb.checked) {
+            dept.employees.forEach(function(e){ bulk.selected[e.id] = true; });
+          } else {
+            bulk.selected = {};
+          }
+          renderAdmin();
+        });
+        selectAllWrap.appendChild(selectAllCb);
+        var selectAllText = document.createElement("span");
+        selectAllText.textContent = "Выбрать всех сотрудников подразделения";
+        selectAllWrap.appendChild(selectAllText);
+        bulkBox.appendChild(selectAllWrap);
+
+        body.appendChild(bulkBox);
+      }
+
       if (dept.employees.length === 0) {
         var noEmp = document.createElement("div");
         noEmp.className = "empty";
@@ -806,10 +946,32 @@
         empBlock.className = "emp-block";
         var empHead = document.createElement("div");
         empHead.className = "emp-block-head";
+
+        var empInfoWrap = document.createElement("div");
+        empInfoWrap.style.display = "flex";
+        empInfoWrap.style.alignItems = "flex-start";
+        empInfoWrap.style.gap = "10px";
+
+        var empSelCb = document.createElement("input");
+        empSelCb.type = "checkbox";
+        empSelCb.style.marginTop = "4px";
+        empSelCb.style.flexShrink = "0";
+        empSelCb.checked = !!getBulk(dept.id).selected[emp.id];
+        empSelCb.addEventListener("change", function(){
+          var b = getBulk(dept.id);
+          if (empSelCb.checked) b.selected[emp.id] = true; else delete b.selected[emp.id];
+          renderAdmin();
+        });
+        empInfoWrap.appendChild(empSelCb);
+
         var metaBits = [];
         if (emp.position) metaBits.push(escapeHtml(emp.position));
         if (emp.tabNumber) metaBits.push("таб. № " + escapeHtml(String(emp.tabNumber)));
-        empHead.innerHTML = '<div><strong>'+escapeHtml(emp.name)+'</strong><div class="meta">'+metaBits.join(" · ")+'</div></div>';
+        var empInfoText = document.createElement("div");
+        empInfoText.innerHTML = '<strong>'+escapeHtml(emp.name)+'</strong><div class="meta">'+metaBits.join(" · ")+'</div>';
+        empInfoWrap.appendChild(empInfoText);
+
+        empHead.appendChild(empInfoWrap);
         var delEmpBtn = document.createElement("button");
         delEmpBtn.className = "btn danger small";
         delEmpBtn.textContent = "Удалить сотрудника";
@@ -831,7 +993,7 @@
           var testDate = rec && rec.testDate ? rec.testDate : "";
           var st = statusForDate(testDate || null, cat.months);
           var tr = document.createElement("tr");
-          if (st.code === "danger") tr.className = "row-danger";
+          if (st.code === "danger" || st.code === "warn" || st.code === "ok") tr.className = "row-" + st.code;
           var tdName = document.createElement("td");
           tdName.textContent = cat.name;
           var tdMonths = document.createElement("td");
