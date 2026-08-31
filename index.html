@@ -379,12 +379,14 @@
       <button class="tab active" data-tab="check">Проверка</button>
       <button class="tab" data-tab="admin">Управление</button>
       <button class="tab" data-tab="qr">Печать QR</button>
+      <button class="tab" data-tab="personalqr">Личные QR</button>
     </nav>
   </header>
 
   <main id="view-check" class="view active"></main>
   <main id="view-admin" class="view"></main>
   <main id="view-qr" class="view"></main>
+  <main id="view-personalqr" class="view"></main>
 </div>
 
 <script>
@@ -713,6 +715,7 @@
       document.getElementById("view-" + btn.dataset.tab).classList.add("active");
       if (btn.dataset.tab === "admin") renderAdmin();
       if (btn.dataset.tab === "qr") renderQr();
+      if (btn.dataset.tab === "personalqr") renderPersonalQrPage();
     });
   });
 
@@ -1957,6 +1960,100 @@
 
     var baseUrl = window.location.href.split("#")[0];
     new QRCode(qrDiv, { text: baseUrl + "#p=" + emp.accessToken, width: 180, height: 180, colorDark:"#14181C", colorLight:"#ffffff" });
+  }
+
+  // ---------- Personal QR tab (one code per employee, same size as the
+  // uniform "Актюбинский ДЭСД" cards) ----------
+  function renderPersonalQrPage(){
+    var root = document.getElementById("view-personalqr");
+    root.innerHTML = "";
+    if (!data || adminPin === null) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+
+    if (!adminUnlocked) {
+      var lock = document.createElement("div");
+      lock.className = "lock-screen panel";
+      lock.innerHTML =
+        '<h2 style="font-size:18px;margin-bottom:6px;">Личные QR-коды</h2>'+
+        '<p class="hint" style="margin-bottom:14px;">Раздел конфиденциальный — введите PIN-код, чтобы распечатать личные QR-коды сотрудников.</p>'+
+        '<input type="password" id="pinp-input" placeholder="PIN" inputmode="numeric">'+
+        '<div class="lock-error" id="pinp-error"></div>';
+      var unlockBtn = document.createElement("button");
+      unlockBtn.className = "btn accent";
+      unlockBtn.textContent = "Войти";
+      unlockBtn.addEventListener("click", tryUnlockPersonalQr);
+      lock.appendChild(unlockBtn);
+      root.appendChild(lock);
+      var pinInput = lock.querySelector("#pinp-input");
+      pinInput.addEventListener("keydown", function(e){ if (e.key === "Enter") tryUnlockPersonalQr(); });
+      pinInput.focus();
+      return;
+    }
+
+    renderPersonalQrContent(root);
+  }
+
+  function tryUnlockPersonalQr(){
+    var val = document.getElementById("pinp-input").value.trim();
+    if (val === MASTER_PIN) {
+      adminUnlocked = true; isDeveloperSession = true; renderPersonalQrPage();
+    } else if (val === adminPin) {
+      adminUnlocked = true; isDeveloperSession = false; renderPersonalQrPage();
+    } else {
+      document.getElementById("pinp-error").textContent = "Неверный PIN-код";
+    }
+  }
+
+  function renderPersonalQrContent(root){
+    var wrap = document.createElement("div");
+    wrap.className = "qr-page";
+
+    var topHint = document.createElement("div");
+    topHint.className = "no-print";
+    topHint.innerHTML = '<p class="hint">Личный QR-код на каждого сотрудника — того же размера, что и карточки «Актюбинский ДЭСД», только вместо общей ссылки внутри зашита ссылка на конкретного человека, а под кодом напечатано его ФИО. Распечатайте столько листов, сколько нужно, и разрежьте по пунктирной линии. Раздавайте лично в руки — не вывешивайте на общий стенд.</p>';
+    var pBtn = document.createElement("button");
+    pBtn.className = "btn accent";
+    pBtn.textContent = "Печать";
+    pBtn.style.marginTop = "8px";
+    pBtn.addEventListener("click", function(){ window.print(); });
+    topHint.appendChild(pBtn);
+    wrap.appendChild(topHint);
+
+    var printArea = document.createElement("div");
+    printArea.id = "print-area";
+
+    var heading = document.createElement("h3");
+    heading.style.cssText = "font-size:16px;margin:8px 0;";
+    heading.textContent = "Личные QR-коды сотрудников";
+    printArea.appendChild(heading);
+
+    var all = allEmployeesFlat();
+    var subHint = document.createElement("p");
+    subHint.className = "hint";
+    subHint.style.marginBottom = "10px";
+    subHint.textContent = "Карточки 65×38 мм — как в едином QR-коде выше. Всего карточек: " + all.length + ".";
+    printArea.appendChild(subHint);
+
+    var grid = document.createElement("div");
+    grid.className = "qr-list-uniform";
+    var baseUrl = window.location.href.split("#")[0];
+
+    all.forEach(function(p){
+      var card = document.createElement("div");
+      card.className = "qr-card-mini";
+      var box = document.createElement("div");
+      box.className = "qr-box";
+      card.appendChild(box);
+      var name = document.createElement("div");
+      name.className = "name";
+      name.textContent = p.emp.name;
+      card.appendChild(name);
+      grid.appendChild(card);
+      new QRCode(box, { text: baseUrl + "#p=" + p.emp.accessToken, width: 70, height: 70, colorDark:"#14181C", colorLight:"#ffffff" });
+    });
+
+    printArea.appendChild(grid);
+    wrap.appendChild(printArea);
+    root.appendChild(wrap);
   }
 
   // ---------- QR ----------
