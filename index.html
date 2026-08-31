@@ -331,6 +331,8 @@
   var bulkState = {}; // deptId -> { category, date, selected: {empId:true} }
   var adminSearchQuery = "";
   var adminSearchFocused = false;
+  var deptSearchQuery = {}; // deptId -> string
+  var deptSearchFocusedId = null;
 
   function getBulk(deptId){
     if (!bulkState[deptId]) {
@@ -934,6 +936,8 @@
 
     data.departments.forEach(function(dept){
       var matchedEmployees = adminQuery ? dept.employees.filter(function(e){ return e.name.toLowerCase().indexOf(adminQuery) !== -1; }) : dept.employees;
+      var localDeptQuery = (deptSearchQuery[dept.id] || "").trim().toLowerCase();
+      var finalEmployees = localDeptQuery ? matchedEmployees.filter(function(e){ return e.name.toLowerCase().indexOf(localDeptQuery) !== -1; }) : matchedEmployees;
       if (adminQuery && matchedEmployees.length === 0) return;
 
       var item = document.createElement("div");
@@ -965,6 +969,39 @@
 
       var body = document.createElement("div");
       body.className = "accordion-body" + ((adminQuery || adminOpen[dept.id]) ? " open" : "");
+
+      // local search inside this department
+      var deptSearchBox = document.createElement("div");
+      deptSearchBox.className = "panel";
+      deptSearchBox.style.marginBottom = "16px";
+      deptSearchBox.innerHTML = '<label style="margin-bottom:6px;">Поиск сотрудника в этом подразделении</label>';
+      var deptSearchField = document.createElement("div");
+      deptSearchField.className = "field";
+      deptSearchField.style.marginBottom = "0";
+      var deptSearchInput = document.createElement("input");
+      deptSearchInput.type = "text";
+      deptSearchInput.id = "dept-search-" + dept.id;
+      deptSearchInput.placeholder = "Введите фамилию сотрудника…";
+      deptSearchInput.style.width = "100%";
+      deptSearchInput.value = deptSearchQuery[dept.id] || "";
+      deptSearchInput.addEventListener("focus", function(){ deptSearchFocusedId = dept.id; });
+      deptSearchInput.addEventListener("blur", function(){ if (deptSearchFocusedId === dept.id) deptSearchFocusedId = null; });
+      deptSearchInput.addEventListener("input", function(){
+        deptSearchQuery[dept.id] = deptSearchInput.value;
+        adminOpen[dept.id] = true;
+        renderAdmin();
+      });
+      deptSearchField.appendChild(deptSearchInput);
+      deptSearchBox.appendChild(deptSearchField);
+      body.appendChild(deptSearchBox);
+      if (deptSearchFocusedId === dept.id) {
+        (function(deptIdForFocus){
+          setTimeout(function(){
+            var el = document.getElementById("dept-search-" + deptIdForFocus);
+            if (el) { el.focus(); var len = el.value.length; el.setSelectionRange(len, len); }
+          }, 0);
+        })(dept.id);
+      }
 
       // add employee form
       var addEmpBox = document.createElement("div");
@@ -1096,14 +1133,16 @@
         body.appendChild(bulkBox);
       }
 
-      if (matchedEmployees.length === 0) {
+      if (finalEmployees.length === 0) {
         var noEmp = document.createElement("div");
         noEmp.className = "empty";
-        noEmp.textContent = "В этом подразделении пока нет сотрудников.";
+        noEmp.textContent = (dept.employees.length === 0)
+          ? "В этом подразделении пока нет сотрудников."
+          : "Никого не найдено по этому запросу.";
         body.appendChild(noEmp);
       }
 
-      matchedEmployees.forEach(function(emp){
+      finalEmployees.forEach(function(emp){
         var empBlock = document.createElement("div");
         empBlock.className = "emp-block";
         var empHead = document.createElement("div");
