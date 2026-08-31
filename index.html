@@ -360,6 +360,8 @@
     body *{visibility:hidden;}
     #print-area, #print-area *{visibility:visible;}
     #print-area{position:absolute;top:0;left:0;width:100%;padding:20px;}
+    #personal-print-area, #personal-print-area *{visibility:visible;}
+    #personal-print-area{position:absolute;top:0;left:0;width:100%;padding:20px;border:none !important;}
     .no-print{display:none !important;}
   }
 </style>
@@ -447,7 +449,7 @@
   var isDeveloperSession = false;
   var pinLogVisible = false;
   var pinLogEntries = [];
-  var check = { step: 1, empDeptId: null, empId: null, deptFilter: null };
+  var check = { step: 1, empDeptId: null, empId: null, deptFilter: null, viaPersonalLink: false, personalToken: null };
   var adminOpen = {}; // deptId -> bool
   var bulkState = {}; // deptId -> { category, date, selected: {empId:true} }
   var adminSearchQuery = "";
@@ -514,6 +516,32 @@
     return d;
   }
 
+  // Confidential per-employee access token used for personal QR deep links
+  // (#p=<token>). Returns true if any token was newly generated.
+  function ensureAccessTokens(d){
+    var changed = false;
+    d.departments.forEach(function(dept){
+      dept.employees.forEach(function(emp){
+        if (!emp.accessToken || typeof emp.accessToken !== "string") {
+          emp.accessToken = uid() + uid();
+          changed = true;
+        }
+      });
+    });
+    return changed;
+  }
+
+  function findByToken(token){
+    if (!data || !token) return null;
+    for (var i = 0; i < data.departments.length; i++){
+      var d = data.departments[i];
+      for (var j = 0; j < d.employees.length; j++){
+        if (d.employees[j].accessToken === token) return { dept: d, emp: d.employees[j] };
+      }
+    }
+    return null;
+  }
+
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
   // Try to read a key a few times before giving up — a single failed read
@@ -539,6 +567,11 @@
       var res = await getWithRetry(DATA_KEY, 3);
       if (res && res.value) {
         data = ensureSizCatalog(migrateEquipment(JSON.parse(res.value)));
+        if (ensureAccessTokens(data)) {
+          // Silently persist newly-minted personal tokens (best-effort;
+          // if it fails, tokens still work for this session).
+          saveData().catch(function(){});
+        }
         return;
       }
     } catch(e){
@@ -551,6 +584,7 @@
         if (marker && marker.value) {
           readError = true;
           data = ensureSizCatalog(seedData()); // shown temporarily, NOT saved
+          ensureAccessTokens(data);
           return;
         }
       } catch(e2){
@@ -560,6 +594,7 @@
     }
     // Genuinely first run: seed once and record the marker.
     data = ensureSizCatalog(seedData());
+    ensureAccessTokens(data);
     var ok = await saveData();
     if (ok) {
       try { await kvSet(MARKER_KEY, "yes"); } catch(e3){}
@@ -939,6 +974,13 @@
       searchWrap.innerHTML = '<input type="text" id="emp-search" placeholder="Введите фамилию сотрудника…" style="width:100%;" autofocus>';
       panel.appendChild(searchWrap);
 
+      var stopPolicyHint = document.createElement("div");
+      stopPolicyHint.className = "hint";
+      stopPolicyHint.style.marginTop = "-6px";
+      stopPolicyHint.style.marginBottom = "10px";
+      stopPolicyHint.textContent = "Здесь можно только посмотреть сроки СИЗ. Остановить работы можно лишь по личному QR-коду сотрудника или через панель управления — так исключается намеренная остановка чужой работы.";
+      panel.appendChild(stopPolicyHint);
+
       var resultsWrap = document.createElement("div");
       panel.appendChild(resultsWrap);
 
@@ -1065,26 +1107,44 @@
           '<div class="stop-desc-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(stopDateStr)+'</div>';
         panel.appendChild(stopDesc);
       } else {
-        var stopActionBox = document.createElement("div");
-        stopActionBox.className = "stop-work-box";
-        var stopActionBtn = document.createElement("button");
-        stopActionBtn.className = "btn danger";
-        stopActionBtn.style.width = "100%";
-        stopActionBtn.style.padding = "16px";
-        stopActionBtn.style.fontSize = "16px";
-        stopActionBtn.textContent = "⛔ СТОП — приостановить все виды работ";
-        stopActionBtn.addEventListener("click", async function(){
-          var who = prompt("ФИО приостанавливающего работы:");
-          if (!who || !who.trim()) { showToast("Пожалуйста, укажите ФИО приостанавливающего работы.", true); return; }
-          var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
-          if (!reason || !reason.trim()) return;
-          await mutateAndSave(function(){
-            startWorkStop(emp, reason.trim(), who.trim());
+        // Anti-abuse guard: stopping someone's work is only allowed when
+        // reached via THAT employee's own confidential personal QR link, or
+        // by an unlocked admin/PIN session. This prevents a coworker from
+        // opening the general (public) employee list and stopping a
+        // different person's work out of spite.
+        var canStop = adminUnlocked || (check.viaPersonalLink && check.personalToken && check.personalToken === emp.accessToken);
+        if (canStop) {
+          var stopActionBox = document.createElement("div");
+          stopActionBox.className = "stop-work-box";
+          var stopActionBtn = document.createElement("button");
+          stopActionBtn.className = "btn danger";
+          stopActionBtn.style.width = "100%";
+          stopActionBtn.style.padding = "16px";
+          stopActionBtn.style.fontSize = "16px";
+          stopActionBtn.textContent = "⛔ СТОП — приостановить все виды работ";
+          stopActionBtn.addEventListener("click", async function(){
+            var who = prompt("ФИО приостанавливающего работы:");
+            if (!who || !who.trim()) { showToast("Пожалуйста, укажите ФИО приостанавливающего работы.", true); return; }
+            var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
+            if (!reason || !reason.trim()) return;
+            await mutateAndSave(function(){
+              startWorkStop(emp, reason.trim(), who.trim());
+            });
+            renderCheck();
           });
-          renderCheck();
-        });
-        stopActionBox.appendChild(stopActionBtn);
-        panel.appendChild(stopActionBox);
+          stopActionBox.appendChild(stopActionBtn);
+          panel.appendChild(stopActionBox);
+        } else {
+          var lockedBox = document.createElement("div");
+          lockedBox.className = "stop-work-box";
+          lockedBox.innerHTML =
+            '<div class="hint" style="padding:14px;border:2px dashed var(--line);">'+
+            '🔒 Остановка работ для этого сотрудника доступна только по его личному QR-коду '+
+            'или через панель управления (PIN). Это сделано специально, чтобы никто не мог '+
+            'открыть общий список и остановить работу другого человека.'+
+            '</div>';
+          panel.appendChild(lockedBox);
+        }
       }
     }
   }
@@ -1631,6 +1691,14 @@
         empInfoWrap.appendChild(empInfoText);
 
         empHead.appendChild(empInfoWrap);
+
+        var personalQrBtn = document.createElement("button");
+        personalQrBtn.className = "btn small";
+        personalQrBtn.textContent = "🔒 Личный QR";
+        personalQrBtn.title = "Показать конфиденциальный QR-код для этого сотрудника";
+        personalQrBtn.addEventListener("click", function(){ openPersonalQrCard(dept, emp); });
+        empHead.appendChild(personalQrBtn);
+
         var delEmpBtn = document.createElement("button");
         delEmpBtn.className = "btn danger small";
         delEmpBtn.textContent = "Удалить сотрудника";
@@ -1819,6 +1887,78 @@
     });
   }
 
+  // ---------- Personal (confidential) employee QR ----------
+  // Opens a printable overlay with a single QR code that deep-links directly
+  // to this one employee's own card (#p=<accessToken>). Unlike the general
+  // QR codes (which open a searchable list of everyone), this link is meant
+  // to be handed only to that employee or their direct supervisor, so no one
+  // else can browse the full list and stop someone else's work on purpose.
+  function openPersonalQrCard(dept, emp){
+    var existing = document.getElementById("personal-qr-overlay");
+    if (existing) existing.remove();
+
+    var overlay = document.createElement("div");
+    overlay.id = "personal-qr-overlay";
+    overlay.className = "no-print";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(12,42,61,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+    var box = document.createElement("div");
+    box.id = "personal-print-area";
+    box.style.cssText = "background:#fff;border:3px solid var(--line-strong);padding:24px;max-width:380px;width:100%;text-align:center;position:relative;";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "btn no-print";
+    closeBtn.textContent = "Закрыть";
+    closeBtn.style.cssText = "position:absolute;top:10px;right:10px;padding:6px 12px;font-size:12px;";
+    closeBtn.addEventListener("click", function(){ overlay.remove(); });
+    box.appendChild(closeBtn);
+
+    var title = document.createElement("h3");
+    title.style.cssText = "font-size:16px;margin:6px 0 8px;padding-right:70px;text-align:left;";
+    title.textContent = "Личный QR-код сотрудника";
+    box.appendChild(title);
+
+    var warn = document.createElement("p");
+    warn.className = "hint";
+    warn.style.cssText = "color:var(--danger);font-weight:600;text-align:left;margin-bottom:14px;";
+    warn.textContent = "Конфиденциально: передайте лично сотруднику или его непосредственному руководителю. Не размещайте на общем стенде вместе с остальными.";
+    box.appendChild(warn);
+
+    var qrDiv = document.createElement("div");
+    qrDiv.className = "qr-box";
+    qrDiv.style.margin = "0 auto 14px";
+    box.appendChild(qrDiv);
+
+    var nameEl = document.createElement("div");
+    nameEl.style.marginBottom = "4px";
+    nameEl.innerHTML = "<strong>"+escapeHtml(emp.name)+"</strong>";
+    box.appendChild(nameEl);
+
+    if (emp.position || emp.tabNumber) {
+      var metaEl = document.createElement("div");
+      metaEl.className = "hint";
+      var bits = [];
+      if (emp.position) bits.push(escapeHtml(emp.position));
+      if (emp.tabNumber) bits.push("Таб. № " + escapeHtml(String(emp.tabNumber)));
+      metaEl.textContent = bits.join(" · ");
+      box.appendChild(metaEl);
+    }
+
+    var printBtn = document.createElement("button");
+    printBtn.className = "btn accent no-print";
+    printBtn.textContent = "Печать";
+    printBtn.style.marginTop = "14px";
+    printBtn.addEventListener("click", function(){ window.print(); });
+    box.appendChild(printBtn);
+
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+
+    var baseUrl = window.location.href.split("#")[0];
+    new QRCode(qrDiv, { text: baseUrl + "#p=" + emp.accessToken, width: 180, height: 180, colorDark:"#14181C", colorLight:"#ffffff" });
+  }
+
   // ---------- QR ----------
   function renderQr(){
     var root = document.getElementById("view-qr");
@@ -1950,6 +2090,18 @@
       var id = h.replace("#dept=", "");
       if (getDept(id)) {
         check.deptFilter = id;
+      }
+    } else if (h.indexOf("#p=") === 0) {
+      // Personal, confidential deep link — jumps straight to one employee's
+      // own card without exposing the searchable full employee list.
+      var token = decodeURIComponent(h.replace("#p=", ""));
+      var found = findByToken(token);
+      if (found) {
+        check.step = 2;
+        check.empDeptId = found.dept.id;
+        check.empId = found.emp.id;
+        check.viaPersonalLink = true;
+        check.personalToken = token;
       }
     }
   }
