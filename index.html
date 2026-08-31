@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Проверка СИЗ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg:#EEF1EF;
+    --surface:#FFFFFF;
+    --ink:#14181C;
+    --ink-soft:#5B6570;
+    --line: rgba(20,24,28,0.16);
+    --line-strong:#14181C;
+    --accent:#DE5A1F;
+    --accent-ink:#FFFFFF;
+    --ok:#1F8A3B;
+    --ok-bg:#E7F5EA;
+    --warn:#B9790A;
+    --warn-bg:#FBF0DA;
+    --danger:#C4342B;
+    --danger-bg:#FBE7E5;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{
+    font-family:'Archivo',sans-serif;
+    font-weight:800;
+    letter-spacing:-0.01em;
+    margin:0;
+  }
+  #app{max-width:900px;margin:0 auto;padding:0 20px 80px;}
+  .topbar{
+    display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;
+    padding:28px 0 18px;border-bottom:3px solid var(--line-strong);margin-bottom:28px;
+  }
+  .brand{display:flex;align-items:baseline;gap:12px;}
+  .brand-mark{font-family:'Archivo',sans-serif;font-weight:800;font-size:28px;background:var(--accent);color:var(--accent-ink);padding:4px 10px;}
+  .brand-sub{color:var(--ink-soft);font-size:14px;}
+  .tabs{display:flex;gap:4px;background:var(--surface);border:2px solid var(--line-strong);}
+  .tab{
+    font-family:'Inter',sans-serif;font-weight:600;font-size:14px;color:var(--ink);
+    background:transparent;border:none;padding:10px 16px;cursor:pointer;
+  }
+  .tab.active{background:var(--ink);color:#fff;}
+  .tab:not(.active):hover{background:var(--bg);}
+  .view{display:none;}
+  .view.active{display:block;}
+
+  .steps{display:flex;gap:0;margin-bottom:28px;border:2px solid var(--line-strong);}
+  .step{flex:1;padding:12px 14px;border-right:2px solid var(--line-strong);}
+  .step:last-child{border-right:none;}
+  .step-num{font-family:'Archivo',sans-serif;font-weight:800;font-size:13px;color:var(--ink-soft);}
+  .step.is-active{background:var(--ink);color:#fff;}
+  .step.is-active .step-num{color:#fff;}
+  .step.is-done{background:#fff;}
+  .step-label{font-size:13px;font-weight:600;margin-top:2px;}
+
+  .panel{background:var(--surface);border:2px solid var(--line-strong);padding:22px;}
+  .panel + .panel{margin-top:18px;}
+
+  .grid-buttons{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+  .pick-btn{
+    text-align:left;font-family:'Inter',sans-serif;font-weight:600;font-size:15px;
+    background:#fff;border:2px solid var(--line-strong);padding:16px;cursor:pointer;color:var(--ink);
+  }
+  .pick-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .pick-btn .sub{display:block;font-weight:400;font-size:12.5px;color:var(--ink-soft);margin-top:4px;}
+  .pick-btn:hover .sub{color:rgba(255,255,255,0.85);}
+
+  .backlink{
+    display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--ink-soft);
+    font-family:'Inter',sans-serif;font-size:14px;font-weight:600;cursor:pointer;padding:0;margin-bottom:16px;
+  }
+  .backlink:hover{color:var(--ink);}
+
+  input[type=text],input[type=date],input[type=number],select{
+    font-family:'Inter',sans-serif;font-size:14px;padding:9px 10px;border:2px solid var(--line-strong);background:#fff;color:var(--ink);
+  }
+  label{font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;}
+  .field{margin-bottom:12px;}
+  .btn{
+    font-family:'Inter',sans-serif;font-weight:700;font-size:14px;padding:10px 18px;
+    background:var(--ink);color:#fff;border:2px solid var(--ink);cursor:pointer;
+  }
+  .btn:hover{background:#000;}
+  .btn.accent{background:var(--accent);border-color:var(--accent);}
+  .btn.accent:hover{background:#C24E19;}
+  .btn.ghost{background:transparent;color:var(--ink);}
+  .btn.ghost:hover{background:var(--bg);}
+  .btn.danger{background:var(--danger);border-color:var(--danger);}
+  .btn.small{padding:6px 10px;font-size:12.5px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+
+  table{width:100%;border-collapse:collapse;margin-top:6px;}
+  th{text-align:left;font-size:12px;text-transform:none;color:var(--ink-soft);font-weight:700;padding:8px 10px;border-bottom:2px solid var(--line-strong);}
+  td{padding:10px 10px;border-bottom:1px solid var(--line);font-size:14.5px;}
+  .badge{display:inline-block;padding:4px 10px;font-size:12.5px;font-weight:700;}
+  .badge.ok{background:var(--ok-bg);color:var(--ok);}
+  .badge.warn{background:var(--warn-bg);color:var(--warn);}
+  .badge.danger{background:var(--danger-bg);color:var(--danger);}
+
+  .empty{color:var(--ink-soft);font-size:14.5px;padding:10px 0;}
+  .hint{color:var(--ink-soft);font-size:13.5px;margin-top:4px;}
+
+  .accordion-item{border:2px solid var(--line-strong);margin-bottom:12px;}
+  .accordion-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;background:#fff;}
+  .accordion-head:hover{background:var(--bg);}
+  .accordion-body{padding:16px;border-top:2px solid var(--line-strong);display:none;}
+  .accordion-body.open{display:block;}
+  .accordion-item h3{font-size:16px;}
+
+  .emp-block{border:1px solid var(--line);padding:12px;margin-bottom:10px;}
+  .emp-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .emp-block-head strong{font-size:14.5px;}
+
+  .qr-page{display:flex;flex-direction:column;gap:24px;}
+  .qr-main{display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:24px;border:2px solid var(--line-strong);background:#fff;}
+  .qr-box{background:#fff;padding:12px;border:2px solid var(--line-strong);}
+  .qr-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
+  .qr-card{border:2px solid var(--line-strong);padding:16px;text-align:center;background:#fff;}
+  .qr-card .qr-box{margin:0 auto 10px;width:fit-content;}
+  .qr-card .name{font-weight:700;font-size:14.5px;}
+
+  .loading{color:var(--ink-soft);padding:40px 0;text-align:center;}
+
+  @media print{
+    body *{visibility:hidden;}
+    #print-area, #print-area *{visibility:visible;}
+    #print-area{position:absolute;top:0;left:0;width:100%;padding:20px;}
+    .no-print{display:none !important;}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar no-print">
+    <div class="brand">
+      <span class="brand-mark">СИЗ</span>
+      <span class="brand-sub">сроки поверки и испытаний</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="check">Проверка</button>
+      <button class="tab" data-tab="admin">Управление</button>
+      <button class="tab" data-tab="qr">Печать QR</button>
+    </nav>
+  </header>
+
+  <main id="view-check" class="view active"></main>
+  <main id="view-admin" class="view"></main>
+  <main id="view-qr" class="view"></main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var DATA_KEY = "siz-data";
+  var data = null;
+  var check = { step: 1, deptId: null, empId: null };
+  var adminOpen = {}; // deptId -> bool
+
+  function uid(){ return Math.random().toString(36).slice(2,10); }
+
+  function todayISO(){
+    var d = new Date();
+    return d.toISOString().slice(0,10);
+  }
+
+  function addMonths(dateStr, months){
+    var d = new Date(dateStr + "T00:00:00");
+    var res = new Date(d);
+    res.setMonth(res.getMonth() + Number(months));
+    return res;
+  }
+
+  function fmtDate(d){
+    if (typeof d === "string") d = new Date(d + "T00:00:00");
+    var dd = String(d.getDate()).padStart(2,"0");
+    var mm = String(d.getMonth()+1).padStart(2,"0");
+    var yyyy = d.getFullYear();
+    return dd + "." + mm + "." + yyyy;
+  }
+
+  function statusFor(item){
+    var next = addMonths(item.testDate, item.validityMonths);
+    var now = new Date();
+    now.setHours(0,0,0,0);
+    var days = Math.round((next - now) / 86400000);
+    if (days < 0) return { code:"danger", label:"Просрочено", next: next, days: days };
+    if (days <= 30) return { code:"warn", label:"Истекает скоро", next: next, days: days };
+    return { code:"ok", label:"Действителен", next: next, days: days };
+  }
+
+  function emptyData(){
+    return { departments: [] };
+  }
+
+  function seedData(){
+    var d1 = { id: uid(), name: "Механический цех", employees: [] };
+    var e1 = { id: uid(), name: "Иванов Пётр Сергеевич", equipment: [] };
+    e1.equipment.push({ id: uid(), name: "Каска защитная", testDate: "2026-03-10", validityMonths: 24 });
+    e1.equipment.push({ id: uid(), name: "Пояс страховочный", testDate: "2026-01-15", validityMonths: 6 });
+    d1.employees.push(e1);
+    var data0 = emptyData();
+    data0.departments.push(d1);
+    return data0;
+  }
+
+  async function loadData(){
+    try {
+      var res = await window.storage.get(DATA_KEY, true);
+      if (res && res.value) {
+        data = JSON.parse(res.value);
+      } else {
+        data = seedData();
+        await saveData();
+      }
+    } catch(e){
+      data = seedData();
+      try { await saveData(); } catch(e2){}
+    }
+  }
+
+  async function saveData(){
+    try {
+      await window.storage.set(DATA_KEY, JSON.stringify(data), true);
+    } catch(e){
+      console.error("Ошибка сохранения", e);
+    }
+  }
+
+  function getDept(id){ return data.departments.find(function(d){return d.id===id;}); }
+  function getEmp(dept, id){ return dept.employees.find(function(e){return e.id===id;}); }
+
+  // ---------- Tabs ----------
+  document.querySelectorAll(".tab").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      document.querySelectorAll(".tab").forEach(function(b){b.classList.remove("active");});
+      document.querySelectorAll(".view").forEach(function(v){v.classList.remove("active");});
+      btn.classList.add("active");
+      document.getElementById("view-" + btn.dataset.tab).classList.add("active");
+      if (btn.dataset.tab === "admin") renderAdmin();
+      if (btn.dataset.tab === "qr") renderQr();
+    });
+  });
+
+  // ---------- CHECK FLOW ----------
+  function renderSteps(container){
+    var labels = ["Подразделение", "Сотрудник", "Результат"];
+    var wrap = document.createElement("div");
+    wrap.className = "steps";
+    labels.forEach(function(label, i){
+      var n = i+1;
+      var el = document.createElement("div");
+      el.className = "step" + (n===check.step ? " is-active" : (n<check.step ? " is-done" : ""));
+      el.innerHTML = '<div class="step-num">0'+n+'</div><div class="step-label">'+label+'</div>';
+      wrap.appendChild(el);
+    });
+    container.appendChild(wrap);
+  }
+
+  function renderCheck(){
+    var root = document.getElementById("view-check");
+    root.innerHTML = "";
+    if (!data) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+
+    renderSteps(root);
+    var panel = document.createElement("div");
+    panel.className = "panel";
+    root.appendChild(panel);
+
+    if (check.step === 1) {
+      panel.innerHTML = '<h2 style="font-size:20px;margin-bottom:14px;">Выберите подразделение</h2>';
+      if (data.departments.length === 0) {
+        panel.innerHTML += '<div class="empty">Подразделения ещё не добавлены. Откройте вкладку «Управление», чтобы их создать.</div>';
+        return;
+      }
+      var grid = document.createElement("div");
+      grid.className = "grid-buttons";
+      data.departments.forEach(function(dept){
+        var b = document.createElement("button");
+        b.className = "pick-btn";
+        var count = dept.employees.length;
+        b.innerHTML = dept.name + '<span class="sub">'+count+' '+pluralPeople(count)+'</span>';
+        b.addEventListener("click", function(){
+          check.step = 2; check.deptId = dept.id; check.empId = null;
+          renderCheck();
+        });
+        grid.appendChild(b);
+      });
+      panel.appendChild(grid);
+    }
+
+    if (check.step === 2) {
+      var dept = getDept(check.deptId);
+      if (!dept) { check.step = 1; return renderCheck(); }
+      var back = document.createElement("button");
+      back.className = "backlink";
+      back.innerHTML = "← Назад к подразделениям";
+      back.addEventListener("click", function(){ check.step = 1; renderCheck(); });
+      panel.appendChild(back);
+      panel.innerHTML += '<h2 style="font-size:20px;margin-bottom:14px;">'+dept.name+' — выберите сотрудника</h2>';
+      if (dept.employees.length === 0) {
+        panel.innerHTML += '<div class="empty">В этом подразделении пока нет сотрудников.</div>';
+        return;
+      }
+      var grid2 = document.createElement("div");
+      grid2.className = "grid-buttons";
+      dept.employees.forEach(function(emp){
+        var b = document.createElement("button");
+        b.className = "pick-btn";
+        b.innerHTML = emp.name + '<span class="sub">'+emp.equipment.length+' ед. СИЗ</span>';
+        b.addEventListener("click", function(){
+          check.step = 3; check.empId = emp.id;
+          renderCheck();
+        });
+        grid2.appendChild(b);
+      });
+      panel.appendChild(grid2);
+    }
+
+    if (check.step === 3) {
+      var dept3 = getDept(check.deptId);
+      var emp = dept3 ? getEmp(dept3, check.empId) : null;
+      if (!dept3 || !emp) { check.step = 1; return renderCheck(); }
+      var back3 = document.createElement("button");
+      back3.className = "backlink";
+      back3.innerHTML = "← Назад к сотрудникам";
+      back3.addEventListener("click", function(){ check.step = 2; renderCheck(); });
+      panel.appendChild(back3);
+      panel.innerHTML += '<h2 style="font-size:20px;">'+emp.name+'</h2><div class="hint" style="margin-bottom:14px;">'+dept3.name+'</div>';
+
+      if (emp.equipment.length === 0) {
+        panel.innerHTML += '<div class="empty">Для сотрудника пока не добавлены СИЗ.</div>';
+        return;
+      }
+      var table = document.createElement("table");
+      table.innerHTML = '<thead><tr><th>Средство защиты</th><th>Дата испытания</th><th>Действительно до</th><th>Статус</th></tr></thead>';
+      var tbody = document.createElement("tbody");
+      emp.equipment.forEach(function(item){
+        var st = statusFor(item);
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td>'+escapeHtml(item.name)+'</td>'+
+          '<td>'+fmtDate(item.testDate)+'</td>'+
+          '<td>'+fmtDate(st.next)+'</td>'+
+          '<td><span class="badge '+st.code+'">'+st.label+'</span></td>';
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      panel.appendChild(table);
+    }
+  }
+
+  function pluralPeople(n){
+    var m = n % 100;
+    if (m >= 11 && m <= 14) return "сотрудников";
+    var l = n % 10;
+    if (l === 1) return "сотрудник";
+    if (l >= 2 && l <= 4) return "сотрудника";
+    return "сотрудников";
+  }
+
+  function escapeHtml(s){
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ---------- ADMIN ----------
+  function renderAdmin(){
+    var root = document.getElementById("view-admin");
+    root.innerHTML = "";
+    if (!data) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+
+    var addPanel = document.createElement("div");
+    addPanel.className = "panel";
+    addPanel.innerHTML = '<h2 style="font-size:18px;margin-bottom:12px;">Добавить подразделение</h2>';
+    var row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = '<div class="field" style="margin-bottom:0;"><label>Название подразделения</label><input type="text" id="new-dept-name" placeholder="например, Электроцех"></div>';
+    var addBtn = document.createElement("button");
+    addBtn.className = "btn accent";
+    addBtn.textContent = "Добавить";
+    addBtn.addEventListener("click", async function(){
+      var input = document.getElementById("new-dept-name");
+      var name = input.value.trim();
+      if (!name) return;
+      data.departments.push({ id: uid(), name: name, employees: [] });
+      await saveData();
+      renderAdmin();
+    });
+    row.appendChild(addBtn);
+    addPanel.appendChild(row);
+    root.appendChild(addPanel);
+
+    if (data.departments.length === 0) {
+      var e = document.createElement("div");
+      e.className = "panel";
+      e.innerHTML = '<div class="empty">Подразделений пока нет. Добавьте первое выше.</div>';
+      root.appendChild(e);
+      return;
+    }
+
+    data.departments.forEach(function(dept){
+      var item = document.createElement("div");
+      item.className = "accordion-item";
+
+      var head = document.createElement("div");
+      head.className = "accordion-head";
+      head.innerHTML = '<h3>'+escapeHtml(dept.name)+' <span class="hint" style="display:inline;">— '+dept.employees.length+' '+pluralPeople(dept.employees.length)+'</span></h3>';
+      var delDeptBtn = document.createElement("button");
+      delDeptBtn.className = "btn danger small";
+      delDeptBtn.textContent = "Удалить подразделение";
+      delDeptBtn.addEventListener("click", async function(ev){
+        ev.stopPropagation();
+        if (!confirm('Удалить подразделение "'+dept.name+'" со всеми сотрудниками и СИЗ?')) return;
+        data.departments = data.departments.filter(function(d){return d.id!==dept.id;});
+        await saveData();
+        renderAdmin();
+      });
+      head.appendChild(delDeptBtn);
+      head.addEventListener("click", function(){
+        adminOpen[dept.id] = !adminOpen[dept.id];
+        renderAdmin();
+      });
+      item.appendChild(head);
+
+      var body = document.createElement("div");
+      body.className = "accordion-body" + (adminOpen[dept.id] ? " open" : "");
+
+      // add employee form
+      var addEmpRow = document.createElement("div");
+      addEmpRow.className = "row";
+      addEmpRow.style.marginBottom = "16px";
+      addEmpRow.innerHTML = '<div class="field" style="margin-bottom:0;"><label>ФИО нового сотрудника</label><input type="text" class="new-emp-name" placeholder="Фамилия Имя Отчество"></div>';
+      var addEmpBtn = document.createElement("button");
+      addEmpBtn.className = "btn small";
+      addEmpBtn.textContent = "Добавить сотрудника";
+      addEmpBtn.addEventListener("click", async function(){
+        var inp = addEmpRow.querySelector(".new-emp-name");
+        var name = inp.value.trim();
+        if (!name) return;
+        dept.employees.push({ id: uid(), name: name, equipment: [] });
+        adminOpen[dept.id] = true;
+        await saveData();
+        renderAdmin();
+      });
+      addEmpRow.appendChild(addEmpBtn);
+      body.appendChild(addEmpRow);
+
+      dept.employees.forEach(function(emp){
+        var empBlock = document.createElement("div");
+        empBlock.className = "emp-block";
+        var empHead = document.createElement("div");
+        empHead.className = "emp-block-head";
+        empHead.innerHTML = '<strong>'+escapeHtml(emp.name)+'</strong>';
+        var delEmpBtn = document.createElement("button");
+        delEmpBtn.className = "btn danger small";
+        delEmpBtn.textContent = "Удалить сотрудника";
+        delEmpBtn.addEventListener("click", async function(){
+          if (!confirm('Удалить сотрудника "'+emp.name+'"?')) return;
+          dept.employees = dept.employees.filter(function(x){return x.id!==emp.id;});
+          await saveData();
+          renderAdmin();
+        });
+        empHead.appendChild(delEmpBtn);
+        empBlock.appendChild(empHead);
+
+        if (emp.equipment.length > 0) {
+          var t = document.createElement("table");
+          t.innerHTML = '<thead><tr><th>СИЗ</th><th>Дата испытания</th><th>Периодичность</th><th>До</th><th></th></tr></thead>';
+          var tb = document.createElement("tbody");
+          emp.equipment.forEach(function(it){
+            var st = statusFor(it);
+            var tr = document.createElement("tr");
+            tr.innerHTML = '<td>'+escapeHtml(it.name)+'</td><td>'+fmtDate(it.testDate)+'</td><td>'+it.validityMonths+' мес.</td>'+
+              '<td><span class="badge '+st.code+'">'+fmtDate(st.next)+'</span></td><td></td>';
+            var delTd = tr.querySelector("td:last-child");
+            var delBtn = document.createElement("button");
+            delBtn.className = "btn danger small";
+            delBtn.textContent = "×";
+            delBtn.addEventListener("click", async function(){
+              emp.equipment = emp.equipment.filter(function(x){return x.id!==it.id;});
+              await saveData();
+              renderAdmin();
+            });
+            delTd.appendChild(delBtn);
+            tb.appendChild(tr);
+          });
+          t.appendChild(tb);
+          empBlock.appendChild(t);
+        }
+
+        // add equipment form
+        var form = document.createElement("div");
+        form.className = "row";
+        form.style.marginTop = "10px";
+        form.innerHTML =
+          '<div class="field" style="margin-bottom:0;"><label>Наименование СИЗ</label><input type="text" class="eq-name" placeholder="например, Каска защитная"></div>'+
+          '<div class="field" style="margin-bottom:0;"><label>Дата испытания</label><input type="date" class="eq-date" value="'+todayISO()+'"></div>'+
+          '<div class="field" style="margin-bottom:0;"><label>Периодичность</label><select class="eq-months">'+
+            '<option value="1">1 месяц</option><option value="3">3 месяца</option><option value="6">6 месяцев</option>'+
+            '<option value="12" selected>12 месяцев</option><option value="24">24 месяца</option><option value="36">36 месяцев</option>'+
+          '</select></div>';
+        var addEqBtn = document.createElement("button");
+        addEqBtn.className = "btn small accent";
+        addEqBtn.textContent = "Добавить СИЗ";
+        addEqBtn.addEventListener("click", async function(){
+          var nameInp = form.querySelector(".eq-name");
+          var dateInp = form.querySelector(".eq-date");
+          var monthsSel = form.querySelector(".eq-months");
+          var name = nameInp.value.trim();
+          if (!name || !dateInp.value) return;
+          emp.equipment.push({ id: uid(), name: name, testDate: dateInp.value, validityMonths: Number(monthsSel.value) });
+          await saveData();
+          renderAdmin();
+        });
+        form.appendChild(addEqBtn);
+        empBlock.appendChild(form);
+
+        body.appendChild(empBlock);
+      });
+
+      item.appendChild(body);
+      root.appendChild(item);
+    });
+  }
+
+  // ---------- QR ----------
+  function renderQr(){
+    var root = document.getElementById("view-qr");
+    root.innerHTML = "";
+    if (!data) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+
+    var wrap = document.createElement("div");
+    wrap.className = "qr-page";
+
+    var printBtn = document.createElement("div");
+    printBtn.className = "no-print";
+    printBtn.innerHTML = '<p class="hint">Распечатайте QR-код и разместите его на стенде или в подразделении. При сканировании телефон откроет этот сайт.</p>';
+    var pBtn = document.createElement("button");
+    pBtn.className = "btn accent";
+    pBtn.textContent = "Печать";
+    pBtn.style.marginTop = "8px";
+    pBtn.addEventListener("click", function(){ window.print(); });
+    printBtn.appendChild(pBtn);
+    wrap.appendChild(printBtn);
+
+    var printArea = document.createElement("div");
+    printArea.id = "print-area";
+
+    var mainBox = document.createElement("div");
+    mainBox.className = "qr-main";
+    var qrDiv = document.createElement("div");
+    qrDiv.className = "qr-box";
+    mainBox.appendChild(qrDiv);
+    var textDiv = document.createElement("div");
+    textDiv.innerHTML = '<h2 style="font-size:20px;margin-bottom:8px;">Проверка сроков СИЗ</h2><p class="hint">Отсканируйте QR-код, выберите подразделение и сотрудника, чтобы увидеть сроки поверки средств индивидуальной защиты.</p>';
+    mainBox.appendChild(textDiv);
+    printArea.appendChild(mainBox);
+
+    var baseUrl = window.location.href.split("#")[0];
+    new QRCode(qrDiv, { text: baseUrl, width: 160, height: 160, colorDark:"#14181C", colorLight:"#ffffff" });
+
+    if (data.departments.length > 0) {
+      var h = document.createElement("h3");
+      h.style.fontSize = "16px";
+      h.style.margin = "8px 0";
+      h.textContent = "Отдельные QR-коды по подразделениям (сразу открывают список сотрудников)";
+      printArea.appendChild(h);
+      var list = document.createElement("div");
+      list.className = "qr-list";
+      data.departments.forEach(function(dept){
+        var card = document.createElement("div");
+        card.className = "qr-card";
+        var qb = document.createElement("div");
+        qb.className = "qr-box";
+        card.appendChild(qb);
+        var name = document.createElement("div");
+        name.className = "name";
+        name.textContent = dept.name;
+        card.appendChild(name);
+        list.appendChild(card);
+        new QRCode(qb, { text: baseUrl + "#dept=" + dept.id, width: 130, height: 130, colorDark:"#14181C", colorLight:"#ffffff" });
+      });
+      printArea.appendChild(list);
+    }
+
+    wrap.appendChild(printArea);
+    root.appendChild(wrap);
+  }
+
+  // ---------- Deep link on load ----------
+  function applyHash(){
+    var h = window.location.hash;
+    if (h.indexOf("#dept=") === 0) {
+      var id = h.replace("#dept=", "");
+      if (getDept(id)) {
+        check.step = 2;
+        check.deptId = id;
+      }
+    }
+  }
+
+  // ---------- Init ----------
+  (async function init(){
+    document.getElementById("view-check").innerHTML = '<div class="loading">Загрузка…</div>';
+    await loadData();
+    applyHash();
+    renderCheck();
+  })();
+
+})();
+</script>
+</body>
+</html>
