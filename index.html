@@ -1190,8 +1190,8 @@
     exportBtn.className = "btn ghost small";
     exportBtn.textContent = "Скачать историю нарушений (Excel)";
     exportBtn.addEventListener("click", exportStopHistoryToExcel);
-    rightBtns.appendChild(changePinBtn);
     rightBtns.appendChild(exportBtn);
+    if (isDeveloperSession) rightBtns.appendChild(changePinBtn);
     if (isDeveloperSession) {
       var clearAllHistBtn = document.createElement("button");
       clearAllHistBtn.className = "btn ghost small";
