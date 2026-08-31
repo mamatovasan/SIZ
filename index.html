@@ -1405,6 +1405,76 @@
       root.appendChild(logPanel);
     }
 
+    if (isDeveloperSession) {
+      // Quick cross-department view of everyone who currently has an active
+      // work stop, so the developer can selectively lift stops without
+      // hunting through each department section individually.
+      var stoppedPanel = document.createElement("div");
+      stoppedPanel.className = "panel";
+      var stoppedList = [];
+      data.departments.forEach(function(d){
+        d.employees.forEach(function(e){
+          if (e.workStop && e.workStop.active) stoppedList.push({ dept: d, emp: e });
+        });
+      });
+      stoppedPanel.innerHTML = '<h3 style="font-size:15px;margin-bottom:10px;">⛔ Работники с активным запретом на работы ('+stoppedList.length+')</h3>';
+
+      if (stoppedList.length === 0) {
+        var noneEl = document.createElement("div");
+        noneEl.className = "empty";
+        noneEl.textContent = "Сейчас ни у кого не остановлены работы.";
+        stoppedPanel.appendChild(noneEl);
+      } else {
+        var stoppedListWrap = document.createElement("div");
+        stoppedListWrap.style.display = "flex";
+        stoppedListWrap.style.flexDirection = "column";
+        stoppedListWrap.style.gap = "10px";
+
+        stoppedList.forEach(function(p){
+          var sDept = p.dept, sEmp = p.emp;
+          var row = document.createElement("div");
+          row.className = "stop-work-box active";
+          row.style.display = "flex";
+          row.style.justifyContent = "space-between";
+          row.style.alignItems = "flex-start";
+          row.style.gap = "12px";
+          row.style.flexWrap = "wrap";
+
+          var icon = document.createElement("div");
+          icon.className = "stop-icon-img";
+          row.appendChild(icon);
+
+          var info = document.createElement("div");
+          info.style.flex = "1";
+          info.style.minWidth = "200px";
+          var wd = new Date(sEmp.workStop.date);
+          var wdStr = isNaN(wd.getTime()) ? sEmp.workStop.date : wd.toLocaleString("ru-RU");
+          info.innerHTML =
+            '<div class="stop-work-title">'+escapeHtml(sEmp.name)+'</div>'+
+            '<div class="hint" style="margin:2px 0 4px;">'+escapeHtml(sDept.name)+(sEmp.position ? ' · '+escapeHtml(sEmp.position) : '')+'</div>'+
+            '<div class="stop-work-reason">'+escapeHtml(sEmp.workStop.reason)+'</div>'+
+            '<div class="stop-work-meta">Остановил: <b>'+escapeHtml(sEmp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(wdStr)+'</div>';
+          row.appendChild(info);
+
+          var liftBtn = document.createElement("button");
+          liftBtn.className = "btn ghost small";
+          liftBtn.textContent = "Снять запрет";
+          liftBtn.style.flexShrink = "0";
+          liftBtn.addEventListener("click", async function(){
+            if (!confirm('Снять запрет на работы для "'+sEmp.name+'"?')) return;
+            var liftedBy = prompt("Ваше ФИО (кто снимает запрет):");
+            await mutateAndSave(function(){ liftWorkStop(sEmp, liftedBy ? liftedBy.trim() : ""); });
+            renderAdmin();
+          });
+          row.appendChild(liftBtn);
+
+          stoppedListWrap.appendChild(row);
+        });
+        stoppedPanel.appendChild(stoppedListWrap);
+      }
+      root.appendChild(stoppedPanel);
+    }
+
     var catalogPanel = document.createElement("div");
     catalogPanel.className = "panel";
     catalogPanel.innerHTML = '<h3 style="font-size:15px;margin-bottom:10px;">Периодичность испытаний СИЗ</h3>';
