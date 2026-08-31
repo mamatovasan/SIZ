@@ -452,6 +452,7 @@
   var pinLogVisible = false;
   var pinLogEntries = [];
   var check = { step: 1, empDeptId: null, empId: null, deptFilter: null, viaPersonalLink: false, personalToken: null };
+  var personalMode = false; // true when opened via an employee's own confidential QR link
   var adminOpen = {}; // deptId -> bool
   var bulkState = {}; // deptId -> { category, date, selected: {empId:true} }
   var adminSearchQuery = "";
@@ -937,10 +938,104 @@
     root.appendChild(panel);
   }
 
+  // Minimal, no-chrome view shown when someone scans an employee's own
+  // personal QR code: just the SIZ expiry list and the stop/start-work
+  // control — no tabs, no PIN, no admin/editor UI, nothing else.
+  function renderPersonalMinimal(root){
+    var dept = getDept(check.empDeptId);
+    var emp = dept ? getEmp(dept, check.empId) : null;
+    if (!dept || !emp) {
+      root.innerHTML = '<div class="empty">Сотрудник не найден.</div>';
+      return;
+    }
+
+    var panel = document.createElement("div");
+    panel.className = "panel";
+
+    var nameEl = document.createElement("div");
+    nameEl.className = "person-name";
+    nameEl.style.marginBottom = "14px";
+    nameEl.textContent = emp.name;
+    panel.appendChild(nameEl);
+
+    if (emp.workStop && emp.workStop.active) {
+      var stopBanner = document.createElement("div");
+      stopBanner.className = "stop-banner";
+      var stopIcon = document.createElement("div");
+      stopIcon.className = "stop-icon-img";
+      stopBanner.appendChild(stopIcon);
+      var stopText = document.createElement("div");
+      stopText.innerHTML =
+        '<div class="stop-banner-title">ДОСТУП К РАБОТАМ ЗАПРЕЩЁН</div>'+
+        '<div class="stop-banner-name">'+escapeHtml(emp.name)+'</div>';
+      stopBanner.appendChild(stopText);
+      panel.appendChild(stopBanner);
+    }
+
+    var list = document.createElement("div");
+    list.className = "siz-card-list";
+    SIZ_CATALOG.forEach(function(cat){
+      var rec = emp.equipment[cat.id];
+      var testDate = rec && rec.testDate ? rec.testDate : null;
+      var st = statusForDate(testDate, cat.months);
+      var cardEl = document.createElement("div");
+      cardEl.className = "siz-card " + st.code;
+      cardEl.innerHTML =
+        '<div class="siz-card-top">'+
+          '<div class="siz-card-name">'+escapeHtml(cat.name)+'</div>'+
+          '<div class="siz-card-status '+st.code+'">'+st.label+'</div>'+
+        '</div>'+
+        '<div class="siz-card-meta">'+
+          'Периодичность: <b>'+cat.months+' мес.</b><br>'+
+          'Дата испытания: <b>'+(testDate ? fmtDate(testDate) : '—')+'</b><br>'+
+          'Следующая проверка: <b>'+(st.next ? fmtDate(st.next) : '—')+'</b>'+
+        '</div>';
+      list.appendChild(cardEl);
+    });
+    panel.appendChild(list);
+
+    if (emp.workStop && emp.workStop.active) {
+      var stopDesc = document.createElement("div");
+      stopDesc.className = "stop-desc";
+      var sd = new Date(emp.workStop.date);
+      var stopDateStr = isNaN(sd.getTime()) ? emp.workStop.date : sd.toLocaleString("ru-RU");
+      stopDesc.innerHTML =
+        '<div class="stop-desc-title">Причина остановки работ</div>'+
+        '<div class="stop-desc-reason">'+escapeHtml(emp.workStop.reason)+'</div>'+
+        '<div class="stop-desc-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(stopDateStr)+'</div>';
+      panel.appendChild(stopDesc);
+    } else {
+      var stopActionBox = document.createElement("div");
+      stopActionBox.className = "stop-work-box";
+      var stopActionBtn = document.createElement("button");
+      stopActionBtn.className = "btn danger";
+      stopActionBtn.style.width = "100%";
+      stopActionBtn.style.padding = "16px";
+      stopActionBtn.style.fontSize = "16px";
+      stopActionBtn.textContent = "⛔ СТОП — приостановить все виды работ";
+      stopActionBtn.addEventListener("click", async function(){
+        var who = prompt("ФИО приостанавливающего работы:");
+        if (!who || !who.trim()) { showToast("Пожалуйста, укажите ФИО приостанавливающего работы.", true); return; }
+        var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
+        if (!reason || !reason.trim()) return;
+        await mutateAndSave(function(){
+          startWorkStop(emp, reason.trim(), who.trim());
+        });
+        renderPersonalMinimal(document.getElementById("view-check"));
+      });
+      stopActionBox.appendChild(stopActionBtn);
+      panel.appendChild(stopActionBox);
+    }
+
+    root.appendChild(panel);
+  }
+
   function renderCheck(){
     var root = document.getElementById("view-check");
     root.innerHTML = "";
     if (!data) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+
+    if (personalMode) { renderPersonalMinimal(root); return; }
 
     maybeRenderErrorBanner(root);
     renderSteps(root);
@@ -2199,6 +2294,7 @@
         check.empId = found.emp.id;
         check.viaPersonalLink = true;
         check.personalToken = token;
+        personalMode = true;
       }
     }
   }
@@ -2209,6 +2305,15 @@
     await loadData();
     await loadPin();
     applyHash();
+    if (personalMode) {
+      // Confidential personal-QR mode: hide the header/tabs entirely so the
+      // page shows nothing but SIZ status and the stop control — no PIN,
+      // no admin/editor UI, no navigation to other sections.
+      var topbarEl = document.querySelector(".topbar");
+      if (topbarEl) topbarEl.style.display = "none";
+      var tabsEl = document.querySelector(".tabs");
+      if (tabsEl) tabsEl.style.display = "none";
+    }
     renderCheck();
   })();
 
