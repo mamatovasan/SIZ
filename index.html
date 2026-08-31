@@ -775,9 +775,7 @@
             "Статус": rec.active ? "Активно" : "Снято",
             "Причина остановки": rec.reason || "",
             "Кто остановил": rec.stoppedBy || "",
-            "Дата остановки": rec.dateStarted ? fmtDate(rec.dateStarted.slice(0,10)) + " " + new Date(rec.dateStarted).toLocaleTimeString("ru-RU") : "",
-            "Кто снял запрет": rec.liftedBy || "",
-            "Дата снятия": rec.dateLifted ? fmtDate(rec.dateLifted.slice(0,10)) + " " + new Date(rec.dateLifted).toLocaleTimeString("ru-RU") : ""
+            "Дата остановки": rec.dateStarted ? fmtDate(rec.dateStarted.slice(0,10)) + " " + new Date(rec.dateStarted).toLocaleTimeString("ru-RU") : ""
           });
         });
       });
@@ -791,8 +789,7 @@
     var ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
       { wch: 28 }, { wch: 30 }, { wch: 26 }, { wch: 12 },
-      { wch: 10 }, { wch: 40 }, { wch: 22 }, { wch: 18 },
-      { wch: 22 }, { wch: 18 }
+      { wch: 10 }, { wch: 40 }, { wch: 22 }, { wch: 18 }
     ];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "История остановок");
