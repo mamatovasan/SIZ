@@ -766,11 +766,9 @@
       "(либо инструмент) пришло в негодность / имеет дефект и не может безопасно использоваться по назначению. "+
       "Акт является основанием для списания и выдачи нового СИЗ / инструмента взамен пришедшего в негодность.</p>";
 
-    if (record.photoDataUrl) {
-      body += "<div class='photo-block'><img src='"+record.photoDataUrl+"' style='max-width:420px;max-height:420px;border:1px solid #999;'>"+
-        (record.photoNote ? "<div style='margin-top:6px;font-size:12.5px;color:#444;'>"+escapeHtml(record.photoNote)+"</div>" : "")+
-        "</div>";
-    }
+    // Photo is intentionally NOT embedded in the Word file — it's already
+    // visible on the site (defect acts tab / lightbox), no need to bloat
+    // the document with it.
 
     body +=
       "<div class='sign-block'>"+
@@ -983,10 +981,9 @@
           data.defectActs.push(record);
         });
         if (!ok) { nextBtn.disabled = false; nextBtn.textContent = "✅ Оформить акт"; return; }
-        generateDefectActWord(record);
         box.innerHTML =
           '<h3 style="font-size:17px;margin-bottom:10px;">Акт оформлен ✅</h3>'+
-          '<p class="hint">Файл Word с актом уже скачивается. Акт также сохранён во вкладке «Деф. акты» и виден руководителю.</p>';
+          '<p class="hint">Акт отправлен руководителю и сохранён во вкладке «Деф. акты».</p>';
         var closeDoneBtn = document.createElement("button");
         closeDoneBtn.className = "btn accent";
         closeDoneBtn.style.marginTop = "14px";
