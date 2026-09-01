@@ -183,6 +183,21 @@
   .siz-card-status.danger{background:var(--danger);color:#fff;}
   .siz-card-status.none{background:var(--none);color:#fff;}
 
+  .siz-card-photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+  .photo-thumb-btn{position:relative;border:2px solid var(--line-strong);padding:0;background:#fff;width:56px;height:56px;cursor:pointer;overflow:hidden;flex-shrink:0;}
+  .photo-thumb-img{width:100%;height:100%;object-fit:cover;display:block;}
+  .photo-thumb-count{position:absolute;bottom:0;right:0;background:var(--ink);color:#fff;font-size:10px;font-weight:700;padding:1px 4px;}
+  .photo-add-btn{white-space:nowrap;}
+  .siz-photo-cell{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+
+  .photo-lightbox-overlay{position:fixed;inset:0;background:rgba(12,42,61,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .photo-lightbox-box{background:#fff;max-width:min(560px,92vw);max-height:92vh;overflow:auto;position:relative;padding:16px;display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .photo-lightbox-close{position:absolute;top:8px;right:8px;background:var(--ink);color:#fff;border:none;width:32px;height:32px;font-size:20px;line-height:1;cursor:pointer;}
+  .photo-lightbox-img{max-width:100%;max-height:60vh;object-fit:contain;}
+  .photo-lightbox-meta{width:100%;font-size:13px;color:var(--ink-soft);text-align:center;}
+  .photo-lightbox-note{color:var(--ink);font-weight:600;margin-bottom:4px;}
+  .photo-lightbox-nav{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;}
+
   @media (max-width:640px){
     #app{padding:0 12px 60px;}
     .topbar{padding:16px;margin:12px 0 18px;gap:10px;}
@@ -462,12 +477,130 @@
 
   function getBulk(deptId){
     if (!bulkState[deptId]) {
-      bulkState[deptId] = { category: SIZ_CATALOG[0].id, date: todayISO(), selected: {} };
+      bulkState[deptId] = {
+        category: SIZ_CATALOG[0].id, date: todayISO(), selected: {},
+        photoCategory: SIZ_CATALOG[0].id, photoDataUrl: null, photoNote: ""
+      };
     }
     return bulkState[deptId];
   }
 
   function uid(){ return Math.random().toString(36).slice(2,10); }
+
+  // ---------- Photo attachments (СИЗ violations, wrong tool type, etc.) ----------
+
+  // Reads an image file, downsizes it and re-encodes as JPEG so photos taken
+  // on a phone don't bloat storage. Returns a data: URL.
+  function compressImageFile(file, maxDim, quality){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onerror = function(){ reject(new Error("Не удалось прочитать файл")); };
+      reader.onload = function(){
+        var img = new Image();
+        img.onerror = function(){ reject(new Error("Не удалось загрузить изображение")); };
+        img.onload = function(){
+          var w = img.width, h = img.height;
+          var scale = Math.min(1, (maxDim || 1280) / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale));
+          var ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = cw; canvas.height = ch;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, cw, ch);
+          try {
+            resolve(canvas.toDataURL("image/jpeg", quality || 0.72));
+          } catch(e){ reject(e); }
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function ensurePhotosArr(emp, catId){
+    if (!emp.equipment[catId]) emp.equipment[catId] = {};
+    if (!emp.equipment[catId].photos) emp.equipment[catId].photos = [];
+    return emp.equipment[catId].photos;
+  }
+
+  // Full-screen viewer for one or more photos, with optional prev/next paging
+  // and an optional delete callback (used from the admin panel).
+  function openPhotoLightbox(photos, startIndex, opts){
+    opts = opts || {};
+    var idx = startIndex || 0;
+    var overlay = document.createElement("div");
+    overlay.className = "photo-lightbox-overlay";
+    document.body.appendChild(overlay);
+
+    function render(){
+      var p = photos[idx];
+      overlay.innerHTML = "";
+      var box = document.createElement("div");
+      box.className = "photo-lightbox-box";
+
+      var closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "photo-lightbox-close";
+      closeBtn.textContent = "×";
+      closeBtn.addEventListener("click", function(){ overlay.remove(); });
+      box.appendChild(closeBtn);
+
+      var img = document.createElement("img");
+      img.src = p.dataUrl;
+      img.className = "photo-lightbox-img";
+      box.appendChild(img);
+
+      var dt = p.addedAt ? new Date(p.addedAt).toLocaleString("ru-RU") : "";
+      var meta = document.createElement("div");
+      meta.className = "photo-lightbox-meta";
+      meta.innerHTML =
+        (p.note ? '<div class="photo-lightbox-note">'+escapeHtml(p.note)+'</div>' : '') +
+        (dt ? '<div class="photo-lightbox-date">'+escapeHtml(dt)+'</div>' : '');
+      box.appendChild(meta);
+
+      if (photos.length > 1) {
+        var nav = document.createElement("div");
+        nav.className = "photo-lightbox-nav";
+        var prevBtn = document.createElement("button");
+        prevBtn.type = "button";
+        prevBtn.className = "btn small";
+        prevBtn.textContent = "← Пред.";
+        prevBtn.addEventListener("click", function(){ idx = (idx - 1 + photos.length) % photos.length; render(); });
+        var counter = document.createElement("span");
+        counter.textContent = (idx+1) + " / " + photos.length;
+        var nextBtn = document.createElement("button");
+        nextBtn.type = "button";
+        nextBtn.className = "btn small";
+        nextBtn.textContent = "След. →";
+        nextBtn.addEventListener("click", function(){ idx = (idx + 1) % photos.length; render(); });
+        nav.appendChild(prevBtn); nav.appendChild(counter); nav.appendChild(nextBtn);
+        box.appendChild(nav);
+      }
+
+      if (opts.onDelete) {
+        var delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn danger small";
+        delBtn.textContent = "Удалить фото";
+        delBtn.addEventListener("click", async function(){
+          if (!confirm("Удалить это фото?")) return;
+          var id = p.id;
+          await opts.onDelete(id);
+          var i = photos.findIndex(function(x){ return x.id === id; });
+          if (i !== -1) photos.splice(i,1);
+          if (photos.length === 0) { overlay.remove(); return; }
+          idx = Math.min(idx, photos.length-1);
+          render();
+        });
+        box.appendChild(delBtn);
+      }
+
+      overlay.appendChild(box);
+    }
+
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) overlay.remove(); });
+    render();
+  }
 
   function todayISO(){
     var d = new Date();
@@ -990,6 +1123,20 @@
           'Дата испытания: <b>'+(testDate ? fmtDate(testDate) : '—')+'</b><br>'+
           'Следующая проверка: <b>'+(st.next ? fmtDate(st.next) : '—')+'</b>'+
         '</div>';
+      if (rec && rec.photos && rec.photos.length > 0) {
+        var photoRow = document.createElement("div");
+        photoRow.className = "siz-card-photos";
+        rec.photos.forEach(function(p, pIdx){
+          var thumbBtn = document.createElement("button");
+          thumbBtn.type = "button";
+          thumbBtn.className = "photo-thumb-btn";
+          thumbBtn.innerHTML = '<img src="'+p.dataUrl+'" class="photo-thumb-img">';
+          thumbBtn.title = p.note || "Открыть фото";
+          thumbBtn.addEventListener("click", function(){ openPhotoLightbox(rec.photos, pIdx); });
+          photoRow.appendChild(thumbBtn);
+        });
+        cardEl.appendChild(photoRow);
+      }
       list.appendChild(cardEl);
     });
     panel.appendChild(list);
@@ -1190,6 +1337,20 @@
             'Дата испытания: <b>'+(testDate ? fmtDate(testDate) : '—')+'</b><br>'+
             'Следующая проверка: <b>'+(st.next ? fmtDate(st.next) : '—')+'</b>'+
           '</div>';
+        if (rec && rec.photos && rec.photos.length > 0) {
+          var photoRow = document.createElement("div");
+          photoRow.className = "siz-card-photos";
+          rec.photos.forEach(function(p, pIdx){
+            var thumbBtn = document.createElement("button");
+            thumbBtn.type = "button";
+            thumbBtn.className = "photo-thumb-btn";
+            thumbBtn.innerHTML = '<img src="'+p.dataUrl+'" class="photo-thumb-img">';
+            thumbBtn.title = p.note || "Открыть фото";
+            thumbBtn.addEventListener("click", function(){ openPhotoLightbox(rec.photos, pIdx); });
+            photoRow.appendChild(thumbBtn);
+          });
+          cardEl.appendChild(photoRow);
+        }
         list.appendChild(cardEl);
       });
       panel.appendChild(list);
@@ -1781,7 +1942,10 @@
           await mutateAndSave(function(){
             ids.forEach(function(id){
               var e = getEmp(dept, id);
-              if (e) e.equipment[bulk.category] = { testDate: bulk.date };
+              if (e) {
+                if (!e.equipment[bulk.category]) e.equipment[bulk.category] = {};
+                e.equipment[bulk.category].testDate = bulk.date;
+              }
             });
           });
           bulk.selected = {};
@@ -1817,6 +1981,115 @@
         bulkBox.appendChild(selectAllWrap);
 
         body.appendChild(bulkBox);
+
+        // ---- Mass photo attachment (e.g. one photo of identical gloves
+        // applied to every selected employee) ----
+        var bulkPhotoBox = document.createElement("div");
+        bulkPhotoBox.className = "panel";
+        bulkPhotoBox.style.marginBottom = "16px";
+        bulkPhotoBox.style.background = "var(--bg)";
+
+        var bulkPhotoTitle = document.createElement("div");
+        bulkPhotoTitle.innerHTML = '<label style="margin-bottom:6px;">Массовое вложение фото по СИЗ</label>'+
+          '<p class="hint" style="margin-bottom:10px;">Например, у всех сотрудников одинаковые диэлектрические перчатки — отметьте их галочками выше (используйте «Выбрать всех» или отметьте вручную), выберите СИЗ, приложите одно фото и нажмите «Прикрепить».</p>';
+        bulkPhotoBox.appendChild(bulkPhotoTitle);
+
+        var bulkPhotoRow = document.createElement("div");
+        bulkPhotoRow.className = "row";
+
+        var photoCatField = document.createElement("div");
+        photoCatField.className = "field";
+        photoCatField.style.marginBottom = "0";
+        photoCatField.style.minWidth = "260px";
+        photoCatField.innerHTML = '<label>Средство защиты</label>';
+        var photoCatSelect = document.createElement("select");
+        photoCatSelect.style.width = "100%";
+        SIZ_CATALOG.forEach(function(cat){
+          var opt = document.createElement("option");
+          opt.value = cat.id;
+          opt.textContent = cat.name;
+          if (cat.id === bulk.photoCategory) opt.selected = true;
+          photoCatSelect.appendChild(opt);
+        });
+        photoCatSelect.addEventListener("change", function(){ bulk.photoCategory = photoCatSelect.value; });
+        photoCatField.appendChild(photoCatSelect);
+        bulkPhotoRow.appendChild(photoCatField);
+
+        var photoFileField = document.createElement("div");
+        photoFileField.className = "field";
+        photoFileField.style.marginBottom = "0";
+        photoFileField.innerHTML = '<label>Фото</label>';
+        var photoFileInner = document.createElement("div");
+        photoFileInner.style.display = "flex";
+        photoFileInner.style.alignItems = "center";
+        photoFileInner.style.gap = "8px";
+        var bulkFileInput = document.createElement("input");
+        bulkFileInput.type = "file";
+        bulkFileInput.accept = "image/*";
+        var bulkPhotoPreview = document.createElement("span");
+        if (bulk.photoDataUrl) {
+          bulkPhotoPreview.innerHTML = '<img src="'+bulk.photoDataUrl+'" class="photo-thumb-img" style="width:40px;height:40px;">';
+        }
+        bulkFileInput.addEventListener("change", async function(){
+          var file = bulkFileInput.files && bulkFileInput.files[0];
+          if (!file) return;
+          try {
+            bulk.photoDataUrl = await compressImageFile(file, 1280, 0.72);
+          } catch(e){
+            showToast("Не удалось обработать фото.", true);
+            return;
+          }
+          renderAdmin();
+        });
+        photoFileInner.appendChild(bulkFileInput);
+        photoFileInner.appendChild(bulkPhotoPreview);
+        photoFileField.appendChild(photoFileInner);
+        bulkPhotoRow.appendChild(photoFileField);
+
+        var bulkPhotoNoteField = document.createElement("div");
+        bulkPhotoNoteField.className = "field";
+        bulkPhotoNoteField.style.marginBottom = "0";
+        bulkPhotoNoteField.style.flex = "1";
+        bulkPhotoNoteField.style.minWidth = "220px";
+        bulkPhotoNoteField.innerHTML = '<label>Комментарий (необязательно)</label>';
+        var bulkPhotoNoteInput = document.createElement("input");
+        bulkPhotoNoteInput.type = "text";
+        bulkPhotoNoteInput.style.width = "100%";
+        bulkPhotoNoteInput.placeholder = "например: партия перчаток ДЭ, общее фото";
+        bulkPhotoNoteInput.value = bulk.photoNote || "";
+        bulkPhotoNoteInput.addEventListener("input", function(){ bulk.photoNote = bulkPhotoNoteInput.value; });
+        bulkPhotoNoteField.appendChild(bulkPhotoNoteInput);
+        bulkPhotoRow.appendChild(bulkPhotoNoteField);
+
+        var applyBulkPhotoBtn = document.createElement("button");
+        applyBulkPhotoBtn.className = "btn accent";
+        applyBulkPhotoBtn.textContent = "Прикрепить фото выбранным (" + bulkSelCount + ")";
+        applyBulkPhotoBtn.disabled = bulkSelCount === 0 || !bulk.photoDataUrl;
+        applyBulkPhotoBtn.addEventListener("click", async function(){
+          if (!bulk.photoDataUrl) return;
+          var ids = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; });
+          if (ids.length === 0) return;
+          var dataUrl = bulk.photoDataUrl;
+          var note = (bulk.photoNote || "").trim();
+          var catId = bulk.photoCategory;
+          await mutateAndSave(function(){
+            ids.forEach(function(id){
+              var e = getEmp(dept, id);
+              if (e) {
+                var arr = ensurePhotosArr(e, catId);
+                arr.push({ id: uid(), dataUrl: dataUrl, note: note, addedAt: new Date().toISOString() });
+              }
+            });
+          });
+          bulk.selected = {};
+          bulk.photoDataUrl = null;
+          bulk.photoNote = "";
+          renderAdmin();
+        });
+        bulkPhotoRow.appendChild(applyBulkPhotoBtn);
+        bulkPhotoBox.appendChild(bulkPhotoRow);
+
+        body.appendChild(bulkPhotoBox);
       }
 
       if (finalEmployees.length === 0) {
@@ -1881,7 +2154,7 @@
         empBlock.appendChild(empHead);
 
         var t = document.createElement("table");
-        t.innerHTML = '<thead><tr><th>СИЗ</th><th>Периодичность</th><th>Дата испытания</th><th>Следующая проверка</th><th>Статус</th><th></th></tr></thead>';
+        t.innerHTML = '<thead><tr><th>СИЗ</th><th>Периодичность</th><th>Дата испытания</th><th>Следующая проверка</th><th>Статус</th><th>Фото</th><th></th></tr></thead>';
         var tb = document.createElement("tbody");
         SIZ_CATALOG.forEach(function(cat){
           var rec = emp.equipment[cat.id];
@@ -1912,25 +2185,103 @@
           clearBtn.textContent = "×";
           clearBtn.title = "Очистить дату";
           clearBtn.addEventListener("click", async function(){
-            await mutateAndSave(function(){ delete emp.equipment[cat.id]; });
+            await mutateAndSave(function(){
+              // Only clear the test date — keep any attached violation photos.
+              if (emp.equipment[cat.id]) {
+                delete emp.equipment[cat.id].testDate;
+                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                  delete emp.equipment[cat.id];
+                }
+              }
+            });
             renderAdmin();
           });
           tdClear.appendChild(clearBtn);
 
           dateInput.addEventListener("change", async function(){
             await mutateAndSave(function(){
-              if (!dateInput.value) { delete emp.equipment[cat.id]; }
-              else { emp.equipment[cat.id] = { testDate: dateInput.value }; }
+              if (!dateInput.value) {
+                if (emp.equipment[cat.id]) {
+                  delete emp.equipment[cat.id].testDate;
+                  if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                    delete emp.equipment[cat.id];
+                  }
+                }
+              } else {
+                if (!emp.equipment[cat.id]) emp.equipment[cat.id] = {};
+                emp.equipment[cat.id].testDate = dateInput.value;
+              }
             });
             renderAdmin();
           });
           tdDate.appendChild(dateInput);
+
+          // ---- Photo cell: view attached violation photos and add new ones
+          // (e.g. wrong type of side cutters, tool not replaced, etc.) ----
+          var tdPhoto = document.createElement("td");
+          tdPhoto.className = "siz-photo-cell";
+          var photos = (rec && rec.photos) ? rec.photos : [];
+          if (photos.length > 0) {
+            var thumbBtn = document.createElement("button");
+            thumbBtn.type = "button";
+            thumbBtn.className = "photo-thumb-btn";
+            thumbBtn.innerHTML = '<img src="'+photos[0].dataUrl+'" class="photo-thumb-img">' +
+              (photos.length > 1 ? '<span class="photo-thumb-count">'+photos.length+'</span>' : '');
+            thumbBtn.title = "Просмотреть фото ("+photos.length+")";
+            thumbBtn.addEventListener("click", function(){
+              openPhotoLightbox(photos, 0, {
+                onDelete: async function(photoId){
+                  await mutateAndSave(function(){
+                    var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
+                    if (arr) {
+                      var i = arr.findIndex(function(x){ return x.id === photoId; });
+                      if (i !== -1) arr.splice(i,1);
+                    }
+                  });
+                  renderAdmin();
+                }
+              });
+            });
+            tdPhoto.appendChild(thumbBtn);
+          }
+          var addPhotoBtn = document.createElement("button");
+          addPhotoBtn.type = "button";
+          addPhotoBtn.className = "btn small photo-add-btn";
+          addPhotoBtn.textContent = photos.length > 0 ? "+" : "📷 Фото";
+          addPhotoBtn.title = "Прикрепить фото (например: СИЗ не того типа, инструмент не заменён)";
+          var photoFileInput = document.createElement("input");
+          photoFileInput.type = "file";
+          photoFileInput.accept = "image/*";
+          photoFileInput.capture = "environment";
+          photoFileInput.style.display = "none";
+          addPhotoBtn.addEventListener("click", function(){ photoFileInput.click(); });
+          photoFileInput.addEventListener("change", async function(){
+            var file = photoFileInput.files && photoFileInput.files[0];
+            photoFileInput.value = "";
+            if (!file) return;
+            var note = prompt("Комментарий к фото (необязательно), например: «Бокорезы не того типа» или «Инструмент не заменён»:") || "";
+            var dataUrl;
+            try {
+              dataUrl = await compressImageFile(file, 1280, 0.72);
+            } catch(e){
+              showToast("Не удалось обработать фото.", true);
+              return;
+            }
+            await mutateAndSave(function(){
+              var arr = ensurePhotosArr(emp, cat.id);
+              arr.push({ id: uid(), dataUrl: dataUrl, note: note.trim(), addedAt: new Date().toISOString() });
+            });
+            renderAdmin();
+          });
+          tdPhoto.appendChild(addPhotoBtn);
+          tdPhoto.appendChild(photoFileInput);
 
           tr.appendChild(tdName);
           tr.appendChild(tdMonths);
           tr.appendChild(tdDate);
           tr.appendChild(tdNext);
           tr.appendChild(tdStatus);
+          tr.appendChild(tdPhoto);
           tr.appendChild(tdClear);
           tb.appendChild(tr);
         });
