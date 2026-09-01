@@ -1475,6 +1475,99 @@
     XLSX.writeFile(wb, "история_остановок_работ_" + stamp + ".xlsx");
   }
 
+  // Полная еженедельная выгрузка: сотрудники+СИЗ, история остановок,
+  // дефектные акты — всё в одном Excel-файле с несколькими листами.
+  function exportFullReportToExcel(){
+    if (!window.XLSX) {
+      showToast("Библиотека экспорта не загрузилась. Проверьте интернет-соединение.", true);
+      return;
+    }
+
+    var wb = XLSX.utils.book_new();
+
+    // Лист 1: Сотрудники и СИЗ (одна строка на каждую позицию СИЗ у сотрудника)
+    var sizRows = [];
+    data.departments.forEach(function(dept){
+      dept.employees.forEach(function(emp){
+        SIZ_CATALOG.forEach(function(cat){
+          var rec = emp.equipment[cat.id];
+          var testDate = rec && rec.testDate ? rec.testDate : null;
+          var st = statusForDate(testDate, cat.months);
+          sizRows.push({
+            "ФИО": emp.name,
+            "Подразделение": dept.name,
+            "Должность": emp.position || "",
+            "Табельный №": emp.tabNumber || "",
+            "Вид СИЗ": cat.name,
+            "Периодичность, мес.": cat.months,
+            "Дата испытания": testDate ? fmtDate(testDate) : "",
+            "Следующая проверка": st.next ? fmtDate(st.next) : "",
+            "Статус": st.label,
+            "Есть фото": (rec && rec.photos && rec.photos.length > 0) ? "Да" : "Нет",
+            "Приостановлен": (emp.workStop && emp.workStop.active) ? "Да" : "Нет"
+          });
+        });
+      });
+    });
+    var wsSiz = XLSX.utils.json_to_sheet(sizRows);
+    wsSiz["!cols"] = [
+      { wch: 28 }, { wch: 30 }, { wch: 26 }, { wch: 12 }, { wch: 26 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 12 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsSiz, "Сотрудники и СИЗ");
+
+    // Лист 2: История остановок работ (все записи, не только активные)
+    var stopRows = [];
+    data.departments.forEach(function(dept){
+      dept.employees.forEach(function(emp){
+        (emp.stopHistory || []).forEach(function(rec){
+          stopRows.push({
+            "ФИО": emp.name,
+            "Подразделение": dept.name,
+            "Статус": rec.active ? "Активно" : "Снято",
+            "Причина остановки": rec.reason || "",
+            "Кто остановил": rec.stoppedBy || "",
+            "Дата остановки": rec.dateStarted ? fmtDate(rec.dateStarted.slice(0,10)) + " " + new Date(rec.dateStarted).toLocaleTimeString("ru-RU") : "",
+            "Кто снял": rec.liftedBy || "",
+            "Дата снятия": rec.dateLifted ? fmtDate(rec.dateLifted.slice(0,10)) + " " + new Date(rec.dateLifted).toLocaleTimeString("ru-RU") : ""
+          });
+        });
+      });
+    });
+    var wsStop = XLSX.utils.json_to_sheet(stopRows);
+    wsStop["!cols"] = [
+      { wch: 28 }, { wch: 30 }, { wch: 10 }, { wch: 40 },
+      { wch: 22 }, { wch: 18 }, { wch: 22 }, { wch: 18 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsStop, "История остановок");
+
+    // Лист 3: Дефектные акты
+    var acts = (data.defectActs || []).slice().sort(function(a,b){ return new Date(b.date) - new Date(a.date); });
+    var actRows = acts.map(function(r){
+      var d = new Date(r.date);
+      return {
+        "Дата": isNaN(d.getTime()) ? r.date : d.toLocaleString("ru-RU"),
+        "ФИО сотрудника": r.empName,
+        "Подразделение": r.deptName,
+        "Должность": r.empPosition || "",
+        "Табельный №": r.empTabNumber || "",
+        "СИЗ / инструмент": r.toolName,
+        "Причина": r.reason,
+        "Фото приложено": r.photoDataUrl ? "Да" : "Нет"
+      };
+    });
+    var wsActs = XLSX.utils.json_to_sheet(actRows);
+    wsActs["!cols"] = [
+      { wch: 18 }, { wch: 28 }, { wch: 30 }, { wch: 24 },
+      { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 12 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsActs, "Дефектные акты");
+
+    var stamp = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, "СИЗ_полная_выгрузка_" + stamp + ".xlsx");
+    showToast("Полная выгрузка скачана.", false);
+  }
+
   function computeStopList(){
     var list = [];
     data.departments.forEach(function(dept){
@@ -2135,6 +2228,74 @@
     exportBtn.textContent = "Скачать историю нарушений (Excel)";
     exportBtn.addEventListener("click", exportStopHistoryToExcel);
     rightBtns.appendChild(exportBtn);
+
+    var fullExportBtn = document.createElement("button");
+    fullExportBtn.className = "btn accent small";
+    fullExportBtn.textContent = "⬇ Полная выгрузка (Excel)";
+    fullExportBtn.title = "Скачать всё сразу одним Excel-файлом: сотрудники и СИЗ, история остановок, дефектные акты — удобно сохранять раз в неделю";
+    fullExportBtn.addEventListener("click", exportFullReportToExcel);
+    rightBtns.appendChild(fullExportBtn);
+
+    // ---- Ручная резервная копия всей базы (JSON-файл на компьютер) ----
+    var backupBtn = document.createElement("button");
+    backupBtn.className = "btn ghost small";
+    backupBtn.textContent = "⬇ Резервная копия базы";
+    backupBtn.title = "Скачать всю базу (сотрудники, СИЗ, дефектные акты) одним файлом";
+    backupBtn.addEventListener("click", function(){
+      try {
+        var json = JSON.stringify(data, null, 2);
+        var blob = new Blob([json], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        var stamp = new Date().toISOString().slice(0,10);
+        link.download = "siz_backup_" + stamp + ".json";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+        showToast("Резервная копия скачана.", false);
+      } catch(e){
+        showToast("Не удалось создать резервную копию.", true);
+      }
+    });
+    rightBtns.appendChild(backupBtn);
+
+    if (isDeveloperSession) {
+      var restoreBtn = document.createElement("button");
+      restoreBtn.className = "btn ghost small";
+      restoreBtn.textContent = "⬆ Загрузить резервную копию";
+      restoreBtn.title = "Полностью заменить текущую базу файлом резервной копии";
+      var restoreFileInput = document.createElement("input");
+      restoreFileInput.type = "file";
+      restoreFileInput.accept = "application/json,.json";
+      restoreFileInput.style.display = "none";
+      restoreBtn.addEventListener("click", function(){ restoreFileInput.click(); });
+      restoreFileInput.addEventListener("change", async function(){
+        var file = restoreFileInput.files && restoreFileInput.files[0];
+        restoreFileInput.value = "";
+        if (!file) return;
+        if (!confirm("Это ПОЛНОСТЬЮ заменит текущую базу содержимым выбранного файла. Текущие данные будут потеряны, если их не сохранить отдельно. Продолжить?")) return;
+        try {
+          var text = await file.text();
+          var parsed = JSON.parse(text);
+          if (!parsed || !Array.isArray(parsed.departments)) {
+            showToast("Файл не похож на резервную копию этой базы.", true);
+            return;
+          }
+          var ok = await mutateAndSave(function(){
+            data = ensureSizCatalog(migrateEquipment(parsed));
+            ensureAccessTokens(data);
+          });
+          if (ok) { showToast("База восстановлена из резервной копии.", false); renderAdmin(); }
+        } catch(e){
+          showToast("Не удалось прочитать файл резервной копии.", true);
+        }
+      });
+      rightBtns.appendChild(restoreBtn);
+      rightBtns.appendChild(restoreFileInput);
+    }
+
     rightBtns.appendChild(changePinBtn);
     if (isDeveloperSession) {
       var clearAllHistBtn = document.createElement("button");
