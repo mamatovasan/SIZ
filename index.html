@@ -187,6 +187,8 @@
   .photo-thumb-btn{position:relative;border:2px solid var(--line-strong);padding:0;background:#fff;width:56px;height:56px;cursor:pointer;overflow:hidden;flex-shrink:0;}
   .photo-thumb-img{width:100%;height:100%;object-fit:cover;display:block;}
   .photo-thumb-count{position:absolute;bottom:0;right:0;background:var(--ink);color:#fff;font-size:10px;font-weight:700;padding:1px 4px;}
+  .photo-thumb-delete{position:absolute;top:-7px;right:-7px;background:var(--danger);color:#fff;border:2px solid #fff;width:20px;height:20px;border-radius:50%;font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;z-index:2;}
+  .photo-thumb-wrap{position:relative;display:inline-block;flex-shrink:0;}
   .photo-add-btn{white-space:nowrap;}
   .siz-photo-cell{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 
@@ -906,6 +908,134 @@
     return counts;
   }
 
+  // Same as computeOverallStats but also keeps the underlying rows per
+  // status code, so the dashboard can drill down into "who exactly".
+  function computeOverallStatsDetailed(){
+    var counts = { ok:0, warn:0, danger:0, none:0 };
+    var details = { ok:[], warn:[], danger:[], none:[] };
+    data.departments.forEach(function(dept){
+      dept.employees.forEach(function(emp){
+        SIZ_CATALOG.forEach(function(cat){
+          var rec = emp.equipment[cat.id];
+          var testDate = rec && rec.testDate ? rec.testDate : null;
+          var st = statusForDate(testDate, cat.months);
+          counts[st.code] = (counts[st.code] || 0) + 1;
+          details[st.code].push({ dept: dept, emp: emp, cat: cat, testDate: testDate, st: st });
+        });
+      });
+    });
+    return { counts: counts, details: details };
+  }
+
+  function exportSizStatusListToExcel(rows, label){
+    if (!window.XLSX) {
+      showToast("Библиотека экспорта не загрузилась. Проверьте интернет-соединение.", true);
+      return;
+    }
+    if (rows.length === 0) {
+      showToast("Список пуст — экспортировать нечего.", true);
+      return;
+    }
+    var out = rows.map(function(r){
+      return {
+        "ФИО": r.emp.name,
+        "Подразделение": r.dept.name,
+        "Должность": r.emp.position || "",
+        "Табельный №": r.emp.tabNumber || "",
+        "Вид СИЗ": r.cat.name,
+        "Периодичность, мес.": r.cat.months,
+        "Дата испытания": r.testDate ? fmtDate(r.testDate) : "",
+        "Следующая проверка": r.st.next ? fmtDate(r.st.next) : "",
+        "Статус": r.st.label
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(out);
+    ws["!cols"] = [
+      { wch: 28 }, { wch: 30 }, { wch: 26 }, { wch: 12 },
+      { wch: 26 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 }
+    ];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "СИЗ");
+    var stamp = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, label + "_" + stamp + ".xlsx");
+  }
+
+  // Overlay listing every SIZ row for one status (ok/warn/danger/none),
+  // opened by clicking a row in the "Общая картина по срокам СИЗ" panel.
+  function openStatusDrilldown(code, label, rows){
+    var existing = document.getElementById("status-drilldown-overlay");
+    if (existing) existing.remove();
+
+    var overlay = document.createElement("div");
+    overlay.id = "status-drilldown-overlay";
+    overlay.className = "no-print";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(12,42,61,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;";
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) overlay.remove(); });
+
+    var box = document.createElement("div");
+    box.style.cssText = "background:#fff;border:3px solid var(--line-strong);padding:20px;max-width:640px;width:100%;max-height:86vh;overflow:auto;position:relative;";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "btn";
+    closeBtn.textContent = "Закрыть";
+    closeBtn.style.cssText = "position:absolute;top:14px;right:14px;padding:6px 12px;font-size:12px;";
+    closeBtn.addEventListener("click", function(){ overlay.remove(); });
+    box.appendChild(closeBtn);
+
+    var title = document.createElement("h3");
+    title.style.cssText = "font-size:17px;margin:0 20px 4px 0;";
+    title.textContent = label + " (" + rows.length + ")";
+    box.appendChild(title);
+
+    var exportBtn = document.createElement("button");
+    exportBtn.className = "btn accent small";
+    exportBtn.textContent = "⬇ Выгрузить в Excel";
+    exportBtn.style.margin = "8px 0 14px";
+    exportBtn.addEventListener("click", function(){
+      exportSizStatusListToExcel(rows, "СИЗ_" + code);
+    });
+    box.appendChild(exportBtn);
+
+    if (rows.length === 0) {
+      var emptyEl = document.createElement("div");
+      emptyEl.className = "empty";
+      emptyEl.textContent = "Список пуст.";
+      box.appendChild(emptyEl);
+    } else {
+      var list = document.createElement("div");
+      list.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+      // Sort worst-first for danger/warn (soonest / most overdue), otherwise by name
+      rows.slice().sort(function(a,b){
+        return a.emp.name.localeCompare(b.emp.name, "ru");
+      }).forEach(function(r){
+        var item = document.createElement("div");
+        item.style.cssText = "border-bottom:1px solid var(--line);padding-bottom:8px;";
+        var nameBtn = document.createElement("button");
+        nameBtn.className = "stop-name-link";
+        nameBtn.style.fontWeight = "700";
+        nameBtn.textContent = r.emp.name;
+        nameBtn.addEventListener("click", function(){
+          overlay.remove();
+          check.step = 2;
+          check.empDeptId = r.dept.id;
+          check.empId = r.emp.id;
+          renderCheck();
+        });
+        item.appendChild(nameBtn);
+        var meta = document.createElement("div");
+        meta.className = "hint";
+        meta.style.marginTop = "2px";
+        meta.textContent = r.dept.name + " · " + r.cat.name + " · след. проверка: " + (r.st.next ? fmtDate(r.st.next) : "—");
+        item.appendChild(meta);
+        list.appendChild(item);
+      });
+      box.appendChild(list);
+    }
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
   function startWorkStop(emp, reason, stoppedBy){
     var record = {
       reason: reason,
@@ -1028,7 +1158,9 @@
   }
 
   function renderStatsDashboard(root){
-    var counts = computeOverallStats();
+    var statsData = computeOverallStatsDetailed();
+    var counts = statsData.counts;
+    var details = statsData.details;
     var total = counts.ok + counts.warn + counts.danger + counts.none;
     if (total === 0) return;
 
@@ -1054,10 +1186,15 @@
       var pct = total ? Math.round(count / total * 100) : 0;
       var rowEl = document.createElement("div");
       rowEl.className = "stats-row";
+      rowEl.style.cursor = "pointer";
+      rowEl.title = "Нажмите, чтобы посмотреть список";
       rowEl.innerHTML =
         '<div class="stats-label">'+statusIconSvg(r.code)+'<span>'+r.label+'</span></div>'+
         '<div class="stats-bar-track"><div class="stats-bar-fill" style="width:'+pct+'%;background:'+r.color+';"></div></div>'+
         '<div class="stats-count">'+count+' <span class="stats-pct">('+pct+'%)</span></div>';
+      rowEl.addEventListener("click", function(){
+        openStatusDrilldown(r.code, r.label, details[r.code] || []);
+      });
       barsWrap.appendChild(rowEl);
     });
     panel.appendChild(barsWrap);
@@ -1065,7 +1202,7 @@
     var hint = document.createElement("div");
     hint.className = "hint";
     hint.style.marginTop = "10px";
-    hint.textContent = "Всего позиций СИЗ по всем сотрудникам: " + total + ".";
+    hint.textContent = "Всего позиций СИЗ по всем сотрудникам: " + total + ". Нажмите на строку выше, чтобы увидеть список и выгрузить его в Excel.";
     panel.appendChild(hint);
 
     root.appendChild(panel);
@@ -2221,15 +2358,17 @@
           var tdPhoto = document.createElement("td");
           tdPhoto.className = "siz-photo-cell";
           var photos = (rec && rec.photos) ? rec.photos : [];
-          if (photos.length > 0) {
+          photos.forEach(function(ph, phIdx){
+            var thumbWrap = document.createElement("div");
+            thumbWrap.className = "photo-thumb-wrap";
+
             var thumbBtn = document.createElement("button");
             thumbBtn.type = "button";
             thumbBtn.className = "photo-thumb-btn";
-            thumbBtn.innerHTML = '<img src="'+photos[0].dataUrl+'" class="photo-thumb-img">' +
-              (photos.length > 1 ? '<span class="photo-thumb-count">'+photos.length+'</span>' : '');
-            thumbBtn.title = "Просмотреть фото ("+photos.length+")";
+            thumbBtn.innerHTML = '<img src="'+ph.dataUrl+'" class="photo-thumb-img">';
+            thumbBtn.title = ph.note || "Просмотреть фото";
             thumbBtn.addEventListener("click", function(){
-              openPhotoLightbox(photos, 0, {
+              openPhotoLightbox(photos, phIdx, {
                 onDelete: async function(photoId){
                   await mutateAndSave(function(){
                     var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
@@ -2242,8 +2381,31 @@
                 }
               });
             });
-            tdPhoto.appendChild(thumbBtn);
-          }
+            thumbWrap.appendChild(thumbBtn);
+
+            // Explicit, always-visible delete button — no need to open the
+            // full-screen viewer first to remove a photo.
+            var delX = document.createElement("button");
+            delX.type = "button";
+            delX.className = "photo-thumb-delete";
+            delX.title = "Удалить это фото";
+            delX.textContent = "×";
+            delX.addEventListener("click", async function(e){
+              e.stopPropagation();
+              if (!confirm("Удалить это фото?")) return;
+              await mutateAndSave(function(){
+                var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
+                if (arr) {
+                  var i = arr.findIndex(function(x){ return x.id === ph.id; });
+                  if (i !== -1) arr.splice(i,1);
+                }
+              });
+              renderAdmin();
+            });
+            thumbWrap.appendChild(delX);
+
+            tdPhoto.appendChild(thumbWrap);
+          });
           var addPhotoBtn = document.createElement("button");
           addPhotoBtn.type = "button";
           addPhotoBtn.className = "btn small photo-add-btn";
