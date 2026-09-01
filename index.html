@@ -1691,6 +1691,34 @@
         renderAdmin();
       });
       rightBtns.appendChild(clearAllHistBtn);
+
+      var clearAllDatesGlobalBtn = document.createElement("button");
+      clearAllDatesGlobalBtn.className = "btn danger small";
+      clearAllDatesGlobalBtn.textContent = "Очистить ВСЕ даты СИЗ (все сотрудники)";
+      clearAllDatesGlobalBtn.title = "Убрать даты испытания по всем видам СИЗ у абсолютно всех сотрудников во всех подразделениях. Фото не удаляются.";
+      clearAllDatesGlobalBtn.addEventListener("click", async function(){
+        var totalEmp = 0;
+        data.departments.forEach(function(d){ totalEmp += d.employees.length; });
+        if (!confirm("Очистить даты испытания ПО ВСЕМ ВИДАМ СИЗ у ВСЕХ сотрудников ("+totalEmp+" чел.) во всех подразделениях?\n\nЭто действие необратимо. Фото останутся, будут очищены только даты.")) return;
+        var typed = prompt('Чтобы подтвердить, введите слово "ОЧИСТИТЬ" (заглавными буквами):');
+        if (typed !== "ОЧИСТИТЬ") { showToast("Отменено — подтверждение не совпало.", true); return; }
+        await mutateAndSave(function(){
+          data.departments.forEach(function(d){
+            d.employees.forEach(function(e){
+              SIZ_CATALOG.forEach(function(cat){
+                if (e.equipment[cat.id]) {
+                  delete e.equipment[cat.id].testDate;
+                  if (!e.equipment[cat.id].photos || e.equipment[cat.id].photos.length === 0) {
+                    delete e.equipment[cat.id];
+                  }
+                }
+              });
+            });
+          });
+        });
+        renderAdmin();
+      });
+      rightBtns.appendChild(clearAllDatesGlobalBtn);
     }
     if (isDeveloperSession) {
       var pinLogBtn = document.createElement("button");
@@ -2118,6 +2146,60 @@
           renderAdmin();
         });
         bulkRow.appendChild(applyBulkBtn);
+
+        var clearBulkDateBtn = document.createElement("button");
+        clearBulkDateBtn.className = "btn ghost";
+        clearBulkDateBtn.textContent = "Очистить дату этого СИЗ у выбранных (" + bulkSelCount + ")";
+        clearBulkDateBtn.title = "Убрать дату испытания выбранного СИЗ у отмеченных сотрудников (фото не удаляются)";
+        clearBulkDateBtn.disabled = bulkSelCount === 0;
+        clearBulkDateBtn.addEventListener("click", async function(){
+          var ids = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; });
+          if (ids.length === 0) return;
+          if (!confirm("Очистить дату «"+ (SIZ_CATALOG.find(function(c){return c.id===bulk.category;})||{}).name +"» у "+ids.length+" выбранных сотрудников?")) return;
+          await mutateAndSave(function(){
+            ids.forEach(function(id){
+              var e = getEmp(dept, id);
+              if (e && e.equipment[bulk.category]) {
+                delete e.equipment[bulk.category].testDate;
+                if (!e.equipment[bulk.category].photos || e.equipment[bulk.category].photos.length === 0) {
+                  delete e.equipment[bulk.category];
+                }
+              }
+            });
+          });
+          bulk.selected = {};
+          renderAdmin();
+        });
+        bulkRow.appendChild(clearBulkDateBtn);
+
+        var clearBulkAllBtn = document.createElement("button");
+        clearBulkAllBtn.className = "btn danger";
+        clearBulkAllBtn.textContent = "Очистить ВСЕ даты СИЗ у выбранных (" + bulkSelCount + ")";
+        clearBulkAllBtn.title = "Убрать даты испытания ПО ВСЕМ видам СИЗ у отмеченных сотрудников (фото не удаляются)";
+        clearBulkAllBtn.disabled = bulkSelCount === 0;
+        clearBulkAllBtn.addEventListener("click", async function(){
+          var ids = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; });
+          if (ids.length === 0) return;
+          if (!confirm("Очистить ВСЕ даты СИЗ (по всем видам) у "+ids.length+" выбранных сотрудников? Это действие необратимо.")) return;
+          await mutateAndSave(function(){
+            ids.forEach(function(id){
+              var e = getEmp(dept, id);
+              if (!e) return;
+              SIZ_CATALOG.forEach(function(cat){
+                if (e.equipment[cat.id]) {
+                  delete e.equipment[cat.id].testDate;
+                  if (!e.equipment[cat.id].photos || e.equipment[cat.id].photos.length === 0) {
+                    delete e.equipment[cat.id];
+                  }
+                }
+              });
+            });
+          });
+          bulk.selected = {};
+          renderAdmin();
+        });
+        bulkRow.appendChild(clearBulkAllBtn);
+
         bulkBox.appendChild(bulkRow);
 
         var selectAllWrap = document.createElement("label");
@@ -2351,6 +2433,27 @@
           renderAdmin();
         });
         empInfoWrap.appendChild(collapseBtn);
+
+        var clearAllDatesBtn = document.createElement("button");
+        clearAllDatesBtn.type = "button";
+        clearAllDatesBtn.className = "btn ghost small";
+        clearAllDatesBtn.textContent = "Очистить все даты";
+        clearAllDatesBtn.title = "Убрать даты испытания по всем СИЗ у этого сотрудника (фото не удаляются)";
+        clearAllDatesBtn.addEventListener("click", async function(){
+          if (!confirm('Очистить ВСЕ даты СИЗ для "'+emp.name+'"? Это действие необратимо.')) return;
+          await mutateAndSave(function(){
+            SIZ_CATALOG.forEach(function(cat){
+              if (emp.equipment[cat.id]) {
+                delete emp.equipment[cat.id].testDate;
+                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                  delete emp.equipment[cat.id];
+                }
+              }
+            });
+          });
+          renderAdmin();
+        });
+        empInfoWrap.appendChild(clearAllDatesBtn);
 
         var metaBits = [];
         if (emp.position) metaBits.push(escapeHtml(emp.position));
