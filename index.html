@@ -283,6 +283,22 @@
   .emp-block-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px;}
   .emp-block-head strong{font-size:14.5px;display:block;}
   .emp-block-head .meta{font-size:12.5px;color:var(--ink-soft);}
+
+  .emp-row-compact{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);margin-bottom:4px;cursor:pointer;background:#fff;}
+  .emp-row-compact:hover{background:var(--bg);}
+  .emp-row-compact .emp-row-name{font-size:13.5px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .emp-row-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .emp-row-dot.ok{background:var(--ok);}
+  .emp-row-dot.warn{background:var(--warn);}
+  .emp-row-dot.danger{background:var(--danger);}
+  .emp-row-dot.none{background:var(--none);}
+  .emp-row-stop{font-size:11px;font-weight:700;color:#fff;background:var(--danger);padding:1px 6px;flex-shrink:0;}
+  .emp-row-chevron{font-size:11px;color:var(--ink-soft);flex-shrink:0;width:14px;text-align:center;}
+  .emp-block table{font-size:12.5px;}
+  .emp-block th{font-size:11px;padding:6px 8px;}
+  .emp-block td{padding:7px 8px;font-size:12.5px;}
+  .emp-block .siz-date-input{width:130px;font-size:12.5px;}
+  .emp-block .badge{font-size:11px;}
   .siz-row-months{color:var(--ink-soft);font-size:12.5px;}
   .siz-date-input{width:150px;}
   .clear-x{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:14px;padding:0 4px;}
@@ -471,6 +487,7 @@
   var check = { step: 1, empDeptId: null, empId: null, deptFilter: null, viaPersonalLink: false, personalToken: null };
   var personalMode = false; // true when opened via an employee's own confidential QR link
   var adminOpen = {}; // deptId -> bool
+  var adminEmpOpen = {}; // empId -> bool — whether a single employee's full SIZ card is expanded
   var bulkState = {}; // deptId -> { category, date, selected: {empId:true} }
   var adminSearchQuery = "";
   var adminSearchFocused = false;
@@ -1605,6 +1622,18 @@
   }
 
   // ---------- ADMIN CONTENT ----------
+  function worstStatusForEmp(emp){
+    var order = { danger:3, warn:2, none:1, ok:0 };
+    var worst = "ok";
+    SIZ_CATALOG.forEach(function(cat){
+      var rec = emp.equipment[cat.id];
+      var testDate = rec && rec.testDate ? rec.testDate : null;
+      var st = statusForDate(testDate, cat.months);
+      if (order[st.code] > order[worst]) worst = st.code;
+    });
+    return worst;
+  }
+
   function renderAdminContent(root){
     maybeRenderErrorBanner(root);
     var topRow = document.createElement("div");
@@ -2236,9 +2265,72 @@
           ? "В этом подразделении пока нет сотрудников."
           : "Никого не найдено по этому запросу.";
         body.appendChild(noEmp);
+      } else {
+        var listHint = document.createElement("div");
+        listHint.className = "hint";
+        listHint.style.margin = "0 0 8px";
+        listHint.textContent = "Нажмите на сотрудника в списке, чтобы открыть его карточку СИЗ. Цветная точка показывает статус: зелёный — всё в порядке, жёлтый — скоро истекает, красный — просрочено, серый — нет данных.";
+        body.appendChild(listHint);
       }
 
       finalEmployees.forEach(function(emp){
+        var worstCode = worstStatusForEmp(emp);
+        var isSearching = !!(adminQuery || localDeptQuery);
+        var isOpen = !!adminEmpOpen[emp.id] || isSearching;
+
+        // Compact row — this is ALL that shows until the admin clicks the
+        // employee: just a status dot and their ФИО, so a department with
+        // many people stays easy to scan instead of dumping every SIZ table
+        // on screen at once.
+        var compactRow = document.createElement("div");
+        compactRow.className = "emp-row-compact";
+
+        var empSelCbCompact = document.createElement("input");
+        empSelCbCompact.type = "checkbox";
+        empSelCbCompact.style.flexShrink = "0";
+        empSelCbCompact.checked = !!getBulk(dept.id).selected[emp.id];
+        empSelCbCompact.title = "Выбрать для массовых действий";
+        empSelCbCompact.addEventListener("click", function(e){ e.stopPropagation(); });
+        empSelCbCompact.addEventListener("change", function(){
+          var b = getBulk(dept.id);
+          if (empSelCbCompact.checked) b.selected[emp.id] = true; else delete b.selected[emp.id];
+          renderAdmin();
+        });
+        compactRow.appendChild(empSelCbCompact);
+
+        var dot = document.createElement("span");
+        dot.className = "emp-row-dot " + worstCode;
+        dot.title = worstCode === "danger" ? "Есть просроченные СИЗ" :
+          (worstCode === "warn" ? "Скоро истекает срок СИЗ" :
+          (worstCode === "none" ? "Есть СИЗ без указанной даты" : "Все СИЗ в порядке"));
+        compactRow.appendChild(dot);
+
+        var nameSpan = document.createElement("span");
+        nameSpan.className = "emp-row-name";
+        nameSpan.textContent = emp.name;
+        compactRow.appendChild(nameSpan);
+
+        if (emp.workStop && emp.workStop.active) {
+          var stopTag = document.createElement("span");
+          stopTag.className = "emp-row-stop";
+          stopTag.textContent = "СТОП";
+          compactRow.appendChild(stopTag);
+        }
+
+        var chevron = document.createElement("span");
+        chevron.className = "emp-row-chevron";
+        chevron.textContent = isOpen ? "▴" : "▾";
+        compactRow.appendChild(chevron);
+
+        compactRow.title = "Нажмите, чтобы " + (isOpen ? "свернуть" : "открыть") + " карточку сотрудника";
+        compactRow.addEventListener("click", function(){
+          adminEmpOpen[emp.id] = !adminEmpOpen[emp.id];
+          renderAdmin();
+        });
+        body.appendChild(compactRow);
+
+        if (!isOpen) return; // collapsed — nothing more to render for this person
+
         var empBlock = document.createElement("div");
         empBlock.className = "emp-block";
         var empHead = document.createElement("div");
@@ -2249,17 +2341,16 @@
         empInfoWrap.style.alignItems = "flex-start";
         empInfoWrap.style.gap = "10px";
 
-        var empSelCb = document.createElement("input");
-        empSelCb.type = "checkbox";
-        empSelCb.style.marginTop = "4px";
-        empSelCb.style.flexShrink = "0";
-        empSelCb.checked = !!getBulk(dept.id).selected[emp.id];
-        empSelCb.addEventListener("change", function(){
-          var b = getBulk(dept.id);
-          if (empSelCb.checked) b.selected[emp.id] = true; else delete b.selected[emp.id];
+        var collapseBtn = document.createElement("button");
+        collapseBtn.type = "button";
+        collapseBtn.className = "btn ghost small";
+        collapseBtn.textContent = "▴ Свернуть";
+        collapseBtn.title = "Свернуть карточку сотрудника";
+        collapseBtn.addEventListener("click", function(){
+          adminEmpOpen[emp.id] = false;
           renderAdmin();
         });
-        empInfoWrap.appendChild(empSelCb);
+        empInfoWrap.appendChild(collapseBtn);
 
         var metaBits = [];
         if (emp.position) metaBits.push(escapeHtml(emp.position));
