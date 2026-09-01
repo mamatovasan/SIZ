@@ -248,6 +248,15 @@
   .stop-name-link{background:none;border:none;padding:0;font:inherit;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;}
   .stop-name-link:hover{color:#8f261f;}
 
+  .defect-count-panel{border:3px solid var(--warn);background:var(--warn-bg);padding:18px 22px;margin-bottom:16px;display:flex;align-items:center;gap:16px;cursor:pointer;}
+  .defect-count-panel.zero{border-color:var(--ok);background:var(--ok-bg);}
+  .defect-count-icon{font-size:30px;flex-shrink:0;line-height:1;}
+  .defect-count-text{font-family:'Archivo',sans-serif;font-weight:800;font-size:17px;color:var(--warn);}
+  .defect-count-panel.zero .defect-count-text{color:var(--ok);}
+  .defect-count-names{font-size:13px;color:var(--ink-soft);margin-top:4px;font-family:'Inter',sans-serif;font-weight:500;}
+  .defect-count-link{background:none;border:none;padding:0;font:inherit;color:var(--warn);font-weight:700;cursor:pointer;text-decoration:underline;}
+  .defect-count-link:hover{color:#8a6205;}
+
   .stop-banner{
     border:4px solid var(--danger);background:var(--danger-bg);padding:20px 24px;
     display:flex;align-items:center;gap:18px;margin-bottom:18px;
@@ -413,6 +422,7 @@
       <button class="tab" data-tab="admin">Управление</button>
       <button class="tab" data-tab="qr">Печать QR</button>
       <button class="tab" data-tab="personalqr">Личные QR</button>
+      <button class="tab" data-tab="defects">Деф. акты</button>
     </nav>
   </header>
 
@@ -420,6 +430,7 @@
   <main id="view-admin" class="view"></main>
   <main id="view-qr" class="view"></main>
   <main id="view-personalqr" class="view"></main>
+  <main id="view-defects" class="view"></main>
 </div>
 
 <script>
@@ -683,6 +694,10 @@
         }
       });
     });
+    if (!Array.isArray(d.defectActs)) {
+      d.defectActs = [];
+      changed = true;
+    }
     return changed;
   }
 
@@ -695,6 +710,299 @@
       }
     }
     return null;
+  }
+
+  // ---------- Defect acts (дефектные акты на СИЗ / инструмент) ----------
+
+  // Builds a Word-compatible .doc file (HTML wrapped with Word XML namespaces,
+  // which Word opens natively, including embedded base64 photos) and
+  // triggers a download. No external library needed.
+  function downloadWordDoc(filename, bodyHtml){
+    var pre =
+      "<html xmlns:o='urn:schemas-microsoft-com:office:office' "+
+      "xmlns:w='urn:schemas-microsoft-com:office:word' "+
+      "xmlns='http://www.w3.org/TR/REC-html40'>"+
+      "<head><meta charset='utf-8'><title>Акт</title>"+
+      "<style>"+
+      "body{font-family:Calibri, Arial, sans-serif;font-size:14px;color:#111;}"+
+      "h1{font-size:18px;text-align:center;margin-bottom:4px;}"+
+      "h2{font-size:13px;text-align:center;font-weight:normal;color:#444;margin-top:0;margin-bottom:22px;}"+
+      "table{border-collapse:collapse;width:100%;margin-bottom:18px;}"+
+      "td, th{border:1px solid #999;padding:8px 10px;font-size:13.5px;vertical-align:top;}"+
+      "td.label{width:220px;background:#f2f2f2;font-weight:bold;}"+
+      ".photo-block{text-align:center;margin:18px 0;}"+
+      ".sign-block{margin-top:40px;}"+
+      ".sign-line{display:inline-block;width:260px;border-bottom:1px solid #333;margin:0 8px;}"+
+      "</style></head><body>";
+    var post = "</body></html>";
+    var fullHtml = pre + bodyHtml + post;
+    var blob = new Blob(['\ufeff', fullHtml], { type: "application/msword" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+  }
+
+  function generateDefectActWord(record){
+    var actNumber = (record.id || "").slice(0,6).toUpperCase();
+    var dateStr = record.date ? fmtDate(record.date.slice(0,10)) + " г." : "";
+    var body =
+      "<h1>АКТ №"+escapeHtml(actNumber)+"</h1>"+
+      "<h2>о выявлении дефекта (неисправности) средства индивидуальной защиты / инструмента</h2>"+
+      "<table>"+
+        "<tr><td class='label'>Дата составления акта</td><td>"+escapeHtml(dateStr)+"</td></tr>"+
+        "<tr><td class='label'>Подразделение</td><td>"+escapeHtml(record.deptName || "")+"</td></tr>"+
+        "<tr><td class='label'>ФИО сотрудника</td><td>"+escapeHtml(record.empName || "")+"</td></tr>"+
+        "<tr><td class='label'>Должность</td><td>"+escapeHtml(record.empPosition || "—")+"</td></tr>"+
+        "<tr><td class='label'>Табельный №</td><td>"+escapeHtml(record.empTabNumber || "—")+"</td></tr>"+
+        "<tr><td class='label'>Наименование СИЗ / инструмента</td><td>"+escapeHtml(record.toolName || "")+"</td></tr>"+
+        "<tr><td class='label'>Причина оформления акта</td><td>"+escapeHtml(record.reason || "")+"</td></tr>"+
+      "</table>"+
+      "<p>Настоящий акт составлен в подтверждение того, что указанное выше средство индивидуальной защиты "+
+      "(либо инструмент) пришло в негодность / имеет дефект и не может безопасно использоваться по назначению. "+
+      "Акт является основанием для списания и выдачи нового СИЗ / инструмента взамен пришедшего в негодность.</p>";
+
+    if (record.photoDataUrl) {
+      body += "<div class='photo-block'><img src='"+record.photoDataUrl+"' style='max-width:420px;max-height:420px;border:1px solid #999;'>"+
+        (record.photoNote ? "<div style='margin-top:6px;font-size:12.5px;color:#444;'>"+escapeHtml(record.photoNote)+"</div>" : "")+
+        "</div>";
+    }
+
+    body +=
+      "<div class='sign-block'>"+
+        "<p>Составил (заявитель): <span class='sign-line'>&nbsp;</span> / "+escapeHtml(record.empName || "")+" /</p>"+
+        "<p>Дата: <span class='sign-line' style='width:140px;'>&nbsp;</span></p>"+
+        "<p style='margin-top:24px;'>Принял (ответственное лицо): <span class='sign-line'>&nbsp;</span> / _______________ /</p>"+
+      "</div>";
+
+    var fileDate = (record.date || todayISO()).slice(0,10);
+    downloadWordDoc("Дефектный_акт_"+fileDate+"_"+actNumber+".doc", body);
+  }
+
+  // Step-by-step questionnaire an employee fills in from their own personal
+  // QR page to report a broken/defective tool or SIZ item. Produces a
+  // record stored centrally (visible in the "Деф. акты" tab) and a
+  // downloadable Word act.
+  var DEFECT_TOOL_OPTIONS = ["Отвёртка", "Плоскогубцы", "Бокорезы", "Стремянка", "Индикатор напряжения", "Молоток", "Другое"];
+
+  function openDefectActWizard(dept, emp){
+    var existing = document.getElementById("defect-wizard-overlay");
+    if (existing) existing.remove();
+
+    var state = { step: 1, toolName: "", reason: "", photoDataUrl: null, photoNote: "" };
+
+    var overlay = document.createElement("div");
+    overlay.id = "defect-wizard-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(12,42,61,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;";
+
+    var box = document.createElement("div");
+    box.style.cssText = "background:#fff;border:3px solid var(--line-strong);padding:22px;max-width:440px;width:100%;max-height:88vh;overflow:auto;";
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function render(){
+      box.innerHTML = "";
+
+      var title = document.createElement("h3");
+      title.style.cssText = "font-size:17px;margin:0 0 4px;";
+      title.textContent = "Дефектный акт — шаг " + state.step + " из 3";
+      box.appendChild(title);
+
+      var progressHint = document.createElement("div");
+      progressHint.className = "hint";
+      progressHint.style.marginBottom = "16px";
+      progressHint.textContent = "Заполните по порядку: инструмент → причина → фото.";
+      box.appendChild(progressHint);
+
+      if (state.step === 1) {
+        var f1 = document.createElement("div");
+        f1.className = "field";
+        f1.innerHTML = '<label>Наименование СИЗ или инструмента</label>';
+        var toolSelect = document.createElement("select");
+        toolSelect.id = "defect-tool-select";
+        toolSelect.style.width = "100%";
+        DEFECT_TOOL_OPTIONS.forEach(function(name){
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          toolSelect.appendChild(opt);
+        });
+        f1.appendChild(toolSelect);
+        box.appendChild(f1);
+
+        var otherWrap = document.createElement("div");
+        otherWrap.className = "field";
+        otherWrap.id = "defect-tool-other-wrap";
+        otherWrap.style.display = "none";
+        otherWrap.innerHTML = '<label>Уточните наименование</label>'+
+          '<input type="text" id="defect-tool-other-input" placeholder="Введите наименование" style="width:100%;">';
+        box.appendChild(otherWrap);
+
+        function syncOtherVisibility(){
+          otherWrap.style.display = (toolSelect.value === "Другое") ? "block" : "none";
+        }
+        toolSelect.addEventListener("change", syncOtherVisibility);
+
+        setTimeout(function(){
+          var knownList = DEFECT_TOOL_OPTIONS.slice(0, -1); // all except "Другое"
+          if (state.toolName && knownList.indexOf(state.toolName) !== -1) {
+            toolSelect.value = state.toolName;
+          } else if (state.toolName) {
+            toolSelect.value = "Другое";
+            var otherInput = document.getElementById("defect-tool-other-input");
+            if (otherInput) otherInput.value = state.toolName;
+          }
+          syncOtherVisibility();
+          toolSelect.focus();
+        }, 0);
+      }
+
+      if (state.step === 2) {
+        var f2 = document.createElement("div");
+        f2.className = "field";
+        f2.innerHTML = '<label>Причина оформления акта</label>'+
+          '<textarea id="defect-reason-input" rows="4" placeholder="Например: треснула рукоятка, режущая кромка выкрошена и т.д." style="width:100%;resize:vertical;"></textarea>';
+        box.appendChild(f2);
+        setTimeout(function(){
+          var inp = document.getElementById("defect-reason-input");
+          if (inp) { inp.value = state.reason; inp.focus(); }
+        }, 0);
+      }
+
+      if (state.step === 3) {
+        var f3 = document.createElement("div");
+        f3.className = "field";
+        f3.innerHTML = '<label>Фото повреждённого СИЗ / инструмента (необязательно)</label>';
+        box.appendChild(f3);
+
+        var photoRowEl = document.createElement("div");
+        photoRowEl.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;";
+        var previewEl = document.createElement("span");
+        if (state.photoDataUrl) {
+          previewEl.innerHTML = '<img src="'+state.photoDataUrl+'" class="photo-thumb-img" style="width:64px;height:64px;">';
+        }
+        var fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "image/*";
+        fileInput.capture = "environment";
+        var photoBtn = document.createElement("button");
+        photoBtn.className = "btn small";
+        photoBtn.type = "button";
+        photoBtn.textContent = state.photoDataUrl ? "Заменить фото" : "📷 Сделать / выбрать фото";
+        photoBtn.addEventListener("click", function(){ fileInput.click(); });
+        fileInput.addEventListener("change", async function(){
+          var file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          try {
+            state.photoDataUrl = await compressImageFile(file, 1280, 0.72);
+          } catch(e){
+            showToast("Не удалось обработать фото.", true);
+            return;
+          }
+          render();
+        });
+        photoRowEl.appendChild(previewEl);
+        photoRowEl.appendChild(photoBtn);
+        photoRowEl.appendChild(fileInput);
+        box.appendChild(photoRowEl);
+
+        var summary = document.createElement("div");
+        summary.className = "panel";
+        summary.style.cssText = "background:var(--bg);margin-top:14px;font-size:13px;";
+        summary.innerHTML =
+          "<b>Проверьте перед отправкой:</b><br>"+
+          "Инструмент/СИЗ: "+escapeHtml(state.toolName || "—")+"<br>"+
+          "Причина: "+escapeHtml(state.reason || "—")+"<br>"+
+          "Сотрудник: "+escapeHtml(emp.name);
+        box.appendChild(summary);
+      }
+
+      var navRow = document.createElement("div");
+      navRow.style.cssText = "display:flex;justify-content:space-between;gap:10px;margin-top:18px;";
+
+      var cancelOrBackBtn = document.createElement("button");
+      cancelOrBackBtn.className = "btn ghost";
+      cancelOrBackBtn.textContent = state.step === 1 ? "Отмена" : "← Назад";
+      cancelOrBackBtn.addEventListener("click", function(){
+        if (state.step === 1) { overlay.remove(); return; }
+        if (state.step === 2) state.reason = (document.getElementById("defect-reason-input")||{}).value || state.reason;
+        state.step -= 1;
+        render();
+      });
+      navRow.appendChild(cancelOrBackBtn);
+
+      var nextBtn = document.createElement("button");
+      nextBtn.className = "btn accent";
+      nextBtn.textContent = state.step === 3 ? "✅ Оформить акт" : "Далее →";
+      nextBtn.addEventListener("click", async function(){
+        if (state.step === 1) {
+          var toolSelectVal = (document.getElementById("defect-tool-select")||{}).value || "";
+          if (toolSelectVal === "Другое") {
+            var otherVal = (document.getElementById("defect-tool-other-input")||{}).value || "";
+            if (!otherVal.trim()) { showToast("Уточните наименование инструмента.", true); return; }
+            state.toolName = otherVal.trim();
+          } else {
+            if (!toolSelectVal) { showToast("Выберите наименование СИЗ или инструмента.", true); return; }
+            state.toolName = toolSelectVal;
+          }
+          state.step = 2;
+          render();
+          return;
+        }
+        if (state.step === 2) {
+          var reasonVal = (document.getElementById("defect-reason-input")||{}).value || "";
+          if (!reasonVal.trim()) { showToast("Укажите причину оформления акта.", true); return; }
+          state.reason = reasonVal.trim();
+          state.step = 3;
+          render();
+          return;
+        }
+        // step 3 — submit
+        nextBtn.disabled = true;
+        nextBtn.textContent = "Сохранение…";
+        var record = {
+          id: uid() + uid(),
+          date: new Date().toISOString(),
+          deptId: dept.id,
+          deptName: dept.name,
+          empId: emp.id,
+          empName: emp.name,
+          empPosition: emp.position || "",
+          empTabNumber: emp.tabNumber || "",
+          toolName: state.toolName,
+          reason: state.reason,
+          photoDataUrl: state.photoDataUrl || null,
+          photoNote: ""
+        };
+        var ok = await mutateAndSave(function(){
+          if (!Array.isArray(data.defectActs)) data.defectActs = [];
+          data.defectActs.push(record);
+        });
+        if (!ok) { nextBtn.disabled = false; nextBtn.textContent = "✅ Оформить акт"; return; }
+        generateDefectActWord(record);
+        box.innerHTML =
+          '<h3 style="font-size:17px;margin-bottom:10px;">Акт оформлен ✅</h3>'+
+          '<p class="hint">Файл Word с актом уже скачивается. Акт также сохранён во вкладке «Деф. акты» и виден руководителю.</p>';
+        var closeDoneBtn = document.createElement("button");
+        closeDoneBtn.className = "btn accent";
+        closeDoneBtn.style.marginTop = "14px";
+        closeDoneBtn.style.width = "100%";
+        closeDoneBtn.textContent = "Закрыть";
+        closeDoneBtn.addEventListener("click", function(){
+          overlay.remove();
+          renderCheck();
+        });
+        box.appendChild(closeDoneBtn);
+      });
+      navRow.appendChild(nextBtn);
+      box.appendChild(navRow);
+    }
+
+    render();
   }
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
@@ -869,6 +1177,7 @@
       if (btn.dataset.tab === "admin") renderAdmin();
       if (btn.dataset.tab === "qr") renderQr();
       if (btn.dataset.tab === "personalqr") renderPersonalQrPage();
+      if (btn.dataset.tab === "defects") renderDefectActsPage();
     });
   });
 
@@ -1166,6 +1475,57 @@
     root.appendChild(panel);
   }
 
+  // Same idea as the "stopped work" banner above, but for defect acts:
+  // green/quiet when nothing is pending, orange and expandable when there
+  // are acts waiting to be reviewed. Clicking jumps straight to the
+  // "Деф. акты" tab.
+  function renderDefectCountPanel(root){
+    var acts = data.defectActs || [];
+    var panel = document.createElement("div");
+    panel.className = "defect-count-panel" + (acts.length === 0 ? " zero" : "");
+    var icon = document.createElement("div");
+    icon.className = "defect-count-icon";
+    icon.textContent = acts.length === 0 ? "✅" : "🛠";
+    panel.appendChild(icon);
+
+    var textWrap = document.createElement("div");
+    textWrap.style.width = "100%";
+    if (acts.length === 0) {
+      textWrap.innerHTML = '<div class="defect-count-text">Дефектных актов нет</div>';
+    } else {
+      var titleEl = document.createElement("div");
+      titleEl.className = "defect-count-text";
+      titleEl.textContent = "Дефектных актов: " + acts.length;
+      textWrap.appendChild(titleEl);
+
+      var namesWrap = document.createElement("div");
+      namesWrap.className = "defect-count-names";
+      var recent = acts.slice().sort(function(a,b){ return new Date(b.date) - new Date(a.date); }).slice(0, 5);
+      recent.forEach(function(rec, idx){
+        var nameBtn = document.createElement("button");
+        nameBtn.className = "defect-count-link";
+        nameBtn.textContent = rec.empName + " (" + rec.toolName + ")";
+        nameBtn.addEventListener("click", function(e){
+          e.stopPropagation();
+          document.querySelector('.tab[data-tab="defects"]').click();
+        });
+        namesWrap.appendChild(nameBtn);
+        if (idx < recent.length - 1) namesWrap.appendChild(document.createTextNode(", "));
+      });
+      if (acts.length > recent.length) {
+        namesWrap.appendChild(document.createTextNode(" и ещё " + (acts.length - recent.length) + "…"));
+      }
+      textWrap.appendChild(namesWrap);
+    }
+    panel.appendChild(textWrap);
+
+    panel.addEventListener("click", function(){
+      document.querySelector('.tab[data-tab="defects"]').click();
+    });
+
+    root.appendChild(panel);
+  }
+
   function statusIconSvg(code){
     var strokeMap = { ok:"var(--ok)", warn:"var(--warn)", danger:"var(--danger)", none:"var(--none)" };
     var stroke = strokeMap[code] || "var(--ink-soft)";
@@ -1245,6 +1605,32 @@
     nameEl.textContent = emp.name;
     panel.appendChild(nameEl);
 
+    // Same green/orange indicator as on the main screen, but scoped to just
+    // this employee's own defect acts (no other tabs exist on this minimal
+    // page, so it needs to be visible right here).
+    var myActs = (data.defectActs || []).filter(function(a){ return a.empId === emp.id; })
+      .sort(function(a,b){ return new Date(b.date) - new Date(a.date); });
+    var defectStatusPanel = document.createElement("div");
+    defectStatusPanel.className = "defect-count-panel" + (myActs.length === 0 ? " zero" : "");
+    defectStatusPanel.style.marginBottom = "14px";
+    var defectStatusIcon = document.createElement("div");
+    defectStatusIcon.className = "defect-count-icon";
+    defectStatusIcon.textContent = myActs.length === 0 ? "✅" : "🛠";
+    defectStatusPanel.appendChild(defectStatusIcon);
+    var defectStatusText = document.createElement("div");
+    defectStatusText.style.width = "100%";
+    if (myActs.length === 0) {
+      defectStatusText.innerHTML = '<div class="defect-count-text">Дефектных актов нет</div>';
+    } else {
+      defectStatusText.innerHTML = '<div class="defect-count-text">Ваших дефектных актов: ' + myActs.length + '</div>';
+      var myActsNames = document.createElement("div");
+      myActsNames.className = "defect-count-names";
+      myActsNames.textContent = myActs.map(function(a){ return a.toolName; }).join(", ");
+      defectStatusText.appendChild(myActsNames);
+    }
+    defectStatusPanel.appendChild(defectStatusText);
+    panel.appendChild(defectStatusPanel);
+
     if (emp.workStop && emp.workStop.active) {
       var stopBanner = document.createElement("div");
       stopBanner.className = "stop-banner";
@@ -1261,7 +1647,17 @@
 
     var list = document.createElement("div");
     list.className = "siz-card-list";
-    SIZ_CATALOG.forEach(function(cat){
+    var filledCats = SIZ_CATALOG.filter(function(cat){
+      var rec = emp.equipment[cat.id];
+      return rec && rec.testDate;
+    });
+    if (filledCats.length === 0) {
+      var noDataEl = document.createElement("div");
+      noDataEl.className = "empty";
+      noDataEl.textContent = "Руководитель/редактор ещё не внёс ни одной даты испытания СИЗ.";
+      list.appendChild(noDataEl);
+    }
+    filledCats.forEach(function(cat){
       var rec = emp.equipment[cat.id];
       var testDate = rec && rec.testDate ? rec.testDate : null;
       var st = statusForDate(testDate, cat.months);
@@ -1328,6 +1724,18 @@
       panel.appendChild(stopActionBox);
     }
 
+    var defectBox = document.createElement("div");
+    defectBox.className = "stop-work-box";
+    var defectBtn = document.createElement("button");
+    defectBtn.className = "btn";
+    defectBtn.style.width = "100%";
+    defectBtn.style.padding = "14px";
+    defectBtn.style.fontSize = "15px";
+    defectBtn.textContent = "🛠 Оформить дефектный акт (сломался инструмент / СИЗ)";
+    defectBtn.addEventListener("click", function(){ openDefectActWizard(dept, emp); });
+    defectBox.appendChild(defectBtn);
+    panel.appendChild(defectBox);
+
     root.appendChild(panel);
   }
 
@@ -1341,6 +1749,7 @@
     maybeRenderErrorBanner(root);
     renderSteps(root);
     if (check.step === 1) renderStopCountPanel(root);
+    if (check.step === 1) renderDefectCountPanel(root);
     if (check.step === 1) renderStatsDashboard(root);
     if (check.step === 1) {
       var midBand = document.createElement("div");
@@ -2873,6 +3282,141 @@
     } else {
       document.getElementById("pinp-error").textContent = "Неверный PIN-код";
     }
+  }
+
+  // ---------- Defect acts tab ----------
+  function renderDefectActsPage(){
+    var root = document.getElementById("view-defects");
+    root.innerHTML = "";
+    if (!data) { root.innerHTML = '<div class="loading">Загрузка…</div>'; return; }
+    renderDefectActsContent(root);
+  }
+
+  function exportDefectActsToExcel(acts){
+    if (!window.XLSX) {
+      showToast("Библиотека экспорта не загрузилась. Проверьте интернет-соединение.", true);
+      return;
+    }
+    if (acts.length === 0) {
+      showToast("Список пуст — экспортировать нечего.", true);
+      return;
+    }
+    var rows = acts.map(function(r){
+      var d = new Date(r.date);
+      return {
+        "Дата": isNaN(d.getTime()) ? r.date : d.toLocaleString("ru-RU"),
+        "ФИО сотрудника": r.empName,
+        "Подразделение": r.deptName,
+        "Должность": r.empPosition || "",
+        "Табельный №": r.empTabNumber || "",
+        "СИЗ / инструмент": r.toolName,
+        "Причина": r.reason,
+        "Фото приложено": r.photoDataUrl ? "Да" : "Нет"
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 18 }, { wch: 28 }, { wch: 30 }, { wch: 24 },
+      { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 12 }
+    ];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Деф. акты");
+    var stamp = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, "дефектные_акты_" + stamp + ".xlsx");
+  }
+
+  function renderDefectActsContent(root){
+    var wrap = document.createElement("div");
+
+    var acts = (data.defectActs || []).slice().sort(function(a,b){
+      return new Date(b.date) - new Date(a.date);
+    });
+
+    var topPanel = document.createElement("div");
+    topPanel.className = "panel";
+    topPanel.style.display = "flex";
+    topPanel.style.justifyContent = "space-between";
+    topPanel.style.alignItems = "center";
+    topPanel.style.flexWrap = "wrap";
+    topPanel.style.gap = "12px";
+    topPanel.innerHTML = '<div><h2 style="font-size:18px;">Дефектные акты ('+acts.length+')</h2>'+
+      '<p class="hint">Акты, которые сотрудники оформили сами через свой личный QR-код при поломке СИЗ или инструмента.</p></div>';
+    var exportAllBtn = document.createElement("button");
+    exportAllBtn.className = "btn ghost small";
+    exportAllBtn.textContent = "⬇ Список в Excel";
+    exportAllBtn.addEventListener("click", function(){ exportDefectActsToExcel(acts); });
+    topPanel.appendChild(exportAllBtn);
+    wrap.appendChild(topPanel);
+
+    if (acts.length === 0) {
+      var emptyPanel = document.createElement("div");
+      emptyPanel.className = "panel";
+      emptyPanel.innerHTML = '<div class="empty">Пока никто не оформлял дефектных актов.</div>';
+      wrap.appendChild(emptyPanel);
+    } else {
+      acts.forEach(function(rec){
+        var card = document.createElement("div");
+        card.className = "panel";
+        var d = new Date(rec.date);
+        var dateStr = isNaN(d.getTime()) ? rec.date : d.toLocaleString("ru-RU");
+
+        var headRow = document.createElement("div");
+        headRow.style.cssText = "display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px;";
+        var headInfo = document.createElement("div");
+        headInfo.innerHTML =
+          '<div style="font-weight:700;font-size:14.5px;">'+escapeHtml(rec.toolName)+'</div>'+
+          '<div class="hint" style="margin-top:2px;">'+escapeHtml(rec.empName)+' · '+escapeHtml(rec.deptName)+(rec.empPosition ? ' · '+escapeHtml(rec.empPosition) : '')+'</div>'+
+          '<div class="hint">'+escapeHtml(dateStr)+'</div>';
+        headRow.appendChild(headInfo);
+
+        var btnGroup = document.createElement("div");
+        btnGroup.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;";
+        var dlBtn = document.createElement("button");
+        dlBtn.className = "btn small";
+        dlBtn.textContent = "⬇ Word";
+        dlBtn.title = "Скачать акт в формате Word";
+        dlBtn.addEventListener("click", function(){ generateDefectActWord(rec); });
+        btnGroup.appendChild(dlBtn);
+        if (isDeveloperSession) {
+          var delActBtn = document.createElement("button");
+          delActBtn.className = "btn danger small";
+          delActBtn.textContent = "Удалить";
+          delActBtn.addEventListener("click", async function(){
+            if (!confirm("Удалить этот дефектный акт?")) return;
+            await mutateAndSave(function(){
+              data.defectActs = (data.defectActs || []).filter(function(x){ return x.id !== rec.id; });
+            });
+            renderDefectActsPage();
+          });
+          btnGroup.appendChild(delActBtn);
+        }
+        headRow.appendChild(btnGroup);
+        card.appendChild(headRow);
+
+        var reasonEl = document.createElement("div");
+        reasonEl.style.fontSize = "13.5px";
+        reasonEl.style.marginBottom = rec.photoDataUrl ? "10px" : "0";
+        reasonEl.innerHTML = "<b>Причина:</b> " + escapeHtml(rec.reason);
+        card.appendChild(reasonEl);
+
+        if (rec.photoDataUrl) {
+          var thumbBtn = document.createElement("button");
+          thumbBtn.type = "button";
+          thumbBtn.className = "photo-thumb-btn";
+          thumbBtn.style.width = "80px";
+          thumbBtn.style.height = "80px";
+          thumbBtn.innerHTML = '<img src="'+rec.photoDataUrl+'" class="photo-thumb-img">';
+          thumbBtn.addEventListener("click", function(){
+            openPhotoLightbox([{ id: rec.id, dataUrl: rec.photoDataUrl, note: rec.toolName, addedAt: rec.date }], 0);
+          });
+          card.appendChild(thumbBtn);
+        }
+
+        wrap.appendChild(card);
+      });
+    }
+
+    root.appendChild(wrap);
   }
 
   function renderPersonalQrContent(root){
