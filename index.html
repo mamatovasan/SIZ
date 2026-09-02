@@ -2318,6 +2318,427 @@
   // только на общие документы. Чтобы добавить сотрудников в цех — отметьте
   // их галочками в списке ниже и используйте блок "Добавить выбранных в
   // цех" рядом с массовыми действиями по СИЗ.
+  function renderEmpAdminRow(dept, emp, container, opts){
+    opts = opts || {};
+    var worstCode = worstStatusForEmp(emp);
+    var isOpen = !!adminEmpOpen[emp.id] || !!opts.forceOpen;
+
+        // Compact row — this is ALL that shows until the admin clicks the
+        // employee: just a status dot and their ФИО, so a department with
+        // many people stays easy to scan instead of dumping every SIZ table
+        // on screen at once.
+        var compactRow = document.createElement("div");
+        compactRow.className = "emp-row-compact";
+
+        var empSelCbCompact = document.createElement("input");
+        empSelCbCompact.type = "checkbox";
+        empSelCbCompact.style.flexShrink = "0";
+        empSelCbCompact.checked = !!getBulk(dept.id).selected[emp.id];
+        empSelCbCompact.title = "Выбрать для массовых действий";
+        empSelCbCompact.addEventListener("click", function(e){ e.stopPropagation(); });
+        empSelCbCompact.addEventListener("change", function(){
+          var b = getBulk(dept.id);
+          if (empSelCbCompact.checked) b.selected[emp.id] = true; else delete b.selected[emp.id];
+          renderAdmin();
+        });
+        compactRow.appendChild(empSelCbCompact);
+
+        var dot = document.createElement("span");
+        dot.className = "emp-row-dot " + worstCode;
+        dot.title = worstCode === "danger" ? "Есть просроченные СИЗ" :
+          (worstCode === "warn" ? "Скоро истекает срок СИЗ" :
+          (worstCode === "none" ? "Есть СИЗ без указанной даты" : "Все СИЗ в порядке"));
+        compactRow.appendChild(dot);
+
+        var nameSpan = document.createElement("span");
+        nameSpan.className = "emp-row-name";
+        nameSpan.textContent = emp.name;
+        compactRow.appendChild(nameSpan);
+
+        if (emp.workStop && emp.workStop.active) {
+          var stopTag = document.createElement("span");
+          stopTag.className = "emp-row-stop";
+          stopTag.textContent = "СТОП";
+          compactRow.appendChild(stopTag);
+        }
+
+        if (opts.shopTag) {
+          var shopTagEl = document.createElement("span");
+          shopTagEl.className = "hint";
+          shopTagEl.style.cssText = "flex-shrink:0;padding:1px 8px;border-radius:20px;background:var(--bg);";
+          shopTagEl.textContent = "🏭 " + opts.shopTag;
+          compactRow.appendChild(shopTagEl);
+        }
+
+        var chevron = document.createElement("span");
+        chevron.className = "emp-row-chevron";
+        chevron.textContent = isOpen ? "▴" : "▾";
+        compactRow.appendChild(chevron);
+
+        compactRow.title = "Нажмите, чтобы " + (isOpen ? "свернуть" : "открыть") + " карточку сотрудника";
+        compactRow.addEventListener("click", function(){
+          adminEmpOpen[emp.id] = !adminEmpOpen[emp.id];
+          renderAdmin();
+        });
+        container.appendChild(compactRow);
+
+        if (!isOpen) return; // collapsed — nothing more to render for this person
+
+        var empBlock = document.createElement("div");
+        empBlock.className = "emp-block";
+        var empHead = document.createElement("div");
+        empHead.className = "emp-block-head";
+
+        var empInfoWrap = document.createElement("div");
+        empInfoWrap.style.display = "flex";
+        empInfoWrap.style.alignItems = "flex-start";
+        empInfoWrap.style.gap = "10px";
+
+        var collapseBtn = document.createElement("button");
+        collapseBtn.type = "button";
+        collapseBtn.className = "btn ghost small";
+        collapseBtn.textContent = "▴ Свернуть";
+        collapseBtn.title = "Свернуть карточку сотрудника";
+        collapseBtn.addEventListener("click", function(){
+          adminEmpOpen[emp.id] = false;
+          renderAdmin();
+        });
+        empInfoWrap.appendChild(collapseBtn);
+
+        var clearAllDatesBtn = document.createElement("button");
+        clearAllDatesBtn.type = "button";
+        clearAllDatesBtn.className = "btn ghost small";
+        clearAllDatesBtn.textContent = "Очистить все даты";
+        clearAllDatesBtn.title = "Убрать даты испытания по всем СИЗ у этого сотрудника (фото не удаляются)";
+        clearAllDatesBtn.addEventListener("click", async function(){
+          if (!confirm('Очистить ВСЕ даты СИЗ для "'+emp.name+'"? Это действие необратимо.')) return;
+          await mutateAndSave(function(){
+            SIZ_CATALOG.forEach(function(cat){
+              if (emp.equipment[cat.id]) {
+                delete emp.equipment[cat.id].testDate;
+                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                  delete emp.equipment[cat.id];
+                }
+              }
+            });
+          });
+          renderAdmin();
+        });
+        empInfoWrap.appendChild(clearAllDatesBtn);
+
+        var metaBits = [];
+        if (emp.position) metaBits.push(escapeHtml(emp.position));
+        if (emp.tabNumber) metaBits.push("таб. № " + escapeHtml(String(emp.tabNumber)));
+        var empInfoText = document.createElement("div");
+        empInfoText.innerHTML = '<strong>'+escapeHtml(emp.name)+'</strong><div class="meta">'+metaBits.join(" · ")+'</div>';
+        empInfoWrap.appendChild(empInfoText);
+
+        empHead.appendChild(empInfoWrap);
+
+        var personalQrBtn = document.createElement("button");
+        personalQrBtn.className = "btn small";
+        personalQrBtn.textContent = "🔒 Личный QR";
+        personalQrBtn.title = "Показать конфиденциальный QR-код для этого сотрудника";
+        personalQrBtn.addEventListener("click", function(){ openPersonalQrCard(dept, emp); });
+        empHead.appendChild(personalQrBtn);
+
+        var delEmpBtn = document.createElement("button");
+        delEmpBtn.className = "btn danger small";
+        delEmpBtn.textContent = "Удалить сотрудника";
+        delEmpBtn.addEventListener("click", async function(){
+          if (!confirm('Удалить сотрудника "'+emp.name+'"?')) return;
+          await mutateAndSave(function(){
+            dept.employees = dept.employees.filter(function(x){return x.id!==emp.id;});
+          });
+          renderAdmin();
+        });
+        if (isDeveloperSession) empHead.appendChild(delEmpBtn);
+        if (Array.isArray(opts.extraHeadButtons)) {
+          opts.extraHeadButtons.forEach(function(btn){ empHead.appendChild(btn); });
+        }
+        empBlock.appendChild(empHead);
+
+        var t = document.createElement("table");
+        t.innerHTML = '<thead><tr><th>СИЗ</th><th>Периодичность</th><th>Дата испытания</th><th>Следующая проверка</th><th>Статус</th><th>Фото</th><th></th></tr></thead>';
+        var tb = document.createElement("tbody");
+        SIZ_CATALOG.forEach(function(cat){
+          var rec = emp.equipment[cat.id];
+          var testDate = rec && rec.testDate ? rec.testDate : "";
+          var st = statusForDate(testDate || null, cat.months);
+          var tr = document.createElement("tr");
+          if (st.code === "danger" || st.code === "warn" || st.code === "ok") tr.className = "row-" + st.code;
+          var tdName = document.createElement("td");
+          tdName.textContent = cat.name;
+          var tdMonths = document.createElement("td");
+          tdMonths.className = "siz-row-months";
+          tdMonths.textContent = cat.months + " мес.";
+          var tdDate = document.createElement("td");
+          var dateInput = document.createElement("input");
+          dateInput.type = "date";
+          dateInput.className = "siz-date-input";
+          dateInput.value = testDate;
+          var tdNext = document.createElement("td");
+          tdNext.textContent = st.next ? fmtDate(st.next) : "—";
+          var tdStatus = document.createElement("td");
+          var badge = document.createElement("span");
+          badge.className = "badge " + st.code;
+          badge.textContent = st.label;
+          tdStatus.appendChild(badge);
+          var tdClear = document.createElement("td");
+          var clearBtn = document.createElement("button");
+          clearBtn.className = "clear-x";
+          clearBtn.textContent = "×";
+          clearBtn.title = "Очистить дату";
+          clearBtn.addEventListener("click", async function(){
+            await mutateAndSave(function(){
+              // Only clear the test date — keep any attached violation photos.
+              if (emp.equipment[cat.id]) {
+                delete emp.equipment[cat.id].testDate;
+                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                  delete emp.equipment[cat.id];
+                }
+              }
+            });
+            renderAdmin();
+          });
+          tdClear.appendChild(clearBtn);
+
+          dateInput.addEventListener("change", async function(){
+            await mutateAndSave(function(){
+              if (!dateInput.value) {
+                if (emp.equipment[cat.id]) {
+                  delete emp.equipment[cat.id].testDate;
+                  if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
+                    delete emp.equipment[cat.id];
+                  }
+                }
+              } else {
+                if (!emp.equipment[cat.id]) emp.equipment[cat.id] = {};
+                emp.equipment[cat.id].testDate = dateInput.value;
+              }
+            });
+            renderAdmin();
+          });
+          tdDate.appendChild(dateInput);
+
+          // ---- Photo cell: view attached violation photos and add new ones
+          // (e.g. wrong type of side cutters, tool not replaced, etc.) ----
+          var tdPhoto = document.createElement("td");
+          tdPhoto.className = "siz-photo-cell";
+          var photos = (rec && rec.photos) ? rec.photos : [];
+          photos.forEach(function(ph, phIdx){
+            var thumbWrap = document.createElement("div");
+            thumbWrap.className = "photo-thumb-wrap";
+
+            var thumbBtn = document.createElement("button");
+            thumbBtn.type = "button";
+            thumbBtn.className = "photo-thumb-btn";
+            thumbBtn.innerHTML = '<img src="'+ph.dataUrl+'" class="photo-thumb-img">';
+            thumbBtn.title = ph.note || "Просмотреть фото";
+            thumbBtn.addEventListener("click", function(){
+              openPhotoLightbox(photos, phIdx, {
+                onDelete: async function(photoId){
+                  await mutateAndSave(function(){
+                    var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
+                    if (arr) {
+                      var i = arr.findIndex(function(x){ return x.id === photoId; });
+                      if (i !== -1) arr.splice(i,1);
+                    }
+                  });
+                  renderAdmin();
+                }
+              });
+            });
+            thumbWrap.appendChild(thumbBtn);
+
+            // Explicit, always-visible delete button — no need to open the
+            // full-screen viewer first to remove a photo.
+            var delX = document.createElement("button");
+            delX.type = "button";
+            delX.className = "photo-thumb-delete";
+            delX.title = "Удалить это фото";
+            delX.textContent = "×";
+            delX.addEventListener("click", async function(e){
+              e.stopPropagation();
+              if (!confirm("Удалить это фото?")) return;
+              await mutateAndSave(function(){
+                var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
+                if (arr) {
+                  var i = arr.findIndex(function(x){ return x.id === ph.id; });
+                  if (i !== -1) arr.splice(i,1);
+                }
+              });
+              renderAdmin();
+            });
+            thumbWrap.appendChild(delX);
+
+            tdPhoto.appendChild(thumbWrap);
+          });
+          var addPhotoBtn = document.createElement("button");
+          addPhotoBtn.type = "button";
+          addPhotoBtn.className = "btn small photo-add-btn";
+          addPhotoBtn.textContent = photos.length > 0 ? "+" : "📷 Фото";
+          addPhotoBtn.title = "Прикрепить фото (например: СИЗ не того типа, инструмент не заменён)";
+          var photoFileInput = document.createElement("input");
+          photoFileInput.type = "file";
+          photoFileInput.accept = "image/*";
+          photoFileInput.capture = "environment";
+          photoFileInput.style.display = "none";
+          addPhotoBtn.addEventListener("click", function(){ photoFileInput.click(); });
+          photoFileInput.addEventListener("change", async function(){
+            var file = photoFileInput.files && photoFileInput.files[0];
+            photoFileInput.value = "";
+            if (!file) return;
+            var note = prompt("Комментарий к фото (необязательно), например: «Бокорезы не того типа» или «Инструмент не заменён»:") || "";
+            var compressed;
+            try {
+              compressed = await compressImageFile(file, 1280, 0.72);
+            } catch(e){
+              showToast("Не удалось обработать фото.", true);
+              return;
+            }
+            showToast("Загрузка фото в Google Drive…", false);
+            var driveUrl;
+            try {
+              driveUrl = await uploadPhotoToDrive(compressed, "siz_" + uid() + ".jpg");
+            } catch(e){
+              showToast("Не удалось загрузить фото в Google Drive.", true);
+              return;
+            }
+            await mutateAndSave(function(){
+              var arr = ensurePhotosArr(emp, cat.id);
+              arr.push({ id: uid(), dataUrl: driveUrl, note: note.trim(), addedAt: new Date().toISOString() });
+            });
+            renderAdmin();
+          });
+          tdPhoto.appendChild(addPhotoBtn);
+          tdPhoto.appendChild(photoFileInput);
+
+          tr.appendChild(tdName);
+          tr.appendChild(tdMonths);
+          tr.appendChild(tdDate);
+          tr.appendChild(tdNext);
+          tr.appendChild(tdStatus);
+          tr.appendChild(tdPhoto);
+          tr.appendChild(tdClear);
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb);
+        empBlock.appendChild(t);
+
+        var stopBox = document.createElement("div");
+        stopBox.className = "stop-work-box" + ((emp.workStop && emp.workStop.active) ? " active" : "");
+        if (emp.workStop && emp.workStop.active) {
+          var stopIconEl = document.createElement("div");
+          stopIconEl.className = "stop-icon-img";
+          stopBox.appendChild(stopIconEl);
+          var stopContent = document.createElement("div");
+          var wd = new Date(emp.workStop.date);
+          var wdStr = isNaN(wd.getTime()) ? emp.workStop.date : wd.toLocaleString("ru-RU");
+          stopContent.innerHTML =
+            '<div class="stop-work-title">⛔ РАБОТЫ ПРИОСТАНОВЛЕНЫ</div>'+
+            '<div class="stop-work-reason">'+escapeHtml(emp.workStop.reason)+'</div>'+
+            '<div class="stop-work-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(wdStr)+'</div>';
+          stopBox.appendChild(stopContent);
+          if (isDeveloperSession) {
+            var liftBtn = document.createElement("button");
+            liftBtn.className = "btn ghost small";
+            liftBtn.textContent = "Снять запрет";
+            liftBtn.style.marginTop = "10px";
+            liftBtn.style.flexShrink = "0";
+            liftBtn.addEventListener("click", async function(){
+              if (!confirm('Снять запрет на работы для "'+emp.name+'"?')) return;
+              var liftedBy = prompt("Ваше ФИО (кто снимает запрет):");
+              await mutateAndSave(function(){ liftWorkStop(emp, liftedBy ? liftedBy.trim() : ""); });
+              renderAdmin();
+            });
+            stopContent.appendChild(liftBtn);
+          } else {
+            var note = document.createElement("div");
+            note.className = "hint";
+            note.style.marginTop = "8px";
+            note.textContent = "Снять запрет может только разработчик.";
+            stopContent.appendChild(note);
+          }
+        } else {
+          var stopBtn = document.createElement("button");
+          stopBtn.className = "btn danger small";
+          stopBtn.textContent = "Остановить работы (нарушение СИЗ / опасные условия)";
+          stopBtn.addEventListener("click", async function(){
+            var who = prompt("ФИО приостанавливающего работы:");
+            var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
+            if (!reason || !reason.trim()) return;
+            await mutateAndSave(function(){
+              startWorkStop(emp, reason.trim(), who ? who.trim() : "");
+            });
+            renderAdmin();
+          });
+          stopBox.appendChild(stopBtn);
+        }
+        empBlock.appendChild(stopBox);
+
+        if (emp.stopHistory && emp.stopHistory.length > 0) {
+          var histBox = document.createElement("div");
+          histBox.className = "stop-work-box";
+          histBox.style.display = "block";
+          var histCount = emp.stopHistory.length;
+          var histTitle = document.createElement("div");
+          histTitle.style.fontWeight = "700";
+          histTitle.style.fontSize = "13.5px";
+          histTitle.style.marginBottom = "8px";
+          histTitle.style.cursor = "pointer";
+          histTitle.textContent = "История приостановок (" + histCount + ") ▾";
+          var histList = document.createElement("div");
+          histList.style.display = "none";
+          histList.style.flexDirection = "column";
+          histList.style.gap = "8px";
+          emp.stopHistory.slice().reverse().forEach(function(rec){
+            var hd1 = new Date(rec.dateStarted);
+            var hd1Str = isNaN(hd1.getTime()) ? rec.dateStarted : hd1.toLocaleString("ru-RU");
+            var row = document.createElement("div");
+            row.style.fontSize = "12.5px";
+            row.style.borderBottom = "1px solid var(--line)";
+            row.style.paddingBottom = "6px";
+            var statusLabel = rec.active
+              ? '<span class="badge danger">Активно</span>'
+              : '<span class="badge ok">Снято</span>';
+            var liftedInfo = "";
+            if (!rec.active && rec.dateLifted) {
+              var hd2 = new Date(rec.dateLifted);
+              var hd2Str = isNaN(hd2.getTime()) ? rec.dateLifted : hd2.toLocaleString("ru-RU");
+              liftedInfo = '<br>Снято: <b>'+escapeHtml(rec.liftedBy || "не указано")+'</b> · '+escapeHtml(hd2Str);
+            }
+            row.innerHTML =
+              statusLabel + ' ' + escapeHtml(rec.reason) + '<br>'+
+              'Остановил: <b>'+escapeHtml(rec.stoppedBy || "не указано")+'</b> · '+escapeHtml(hd1Str) +
+              liftedInfo;
+            histList.appendChild(row);
+          });
+          histTitle.addEventListener("click", function(){
+            var open = histList.style.display !== "none";
+            histList.style.display = open ? "none" : "flex";
+            histTitle.textContent = "История приостановок (" + histCount + ") " + (open ? "▾" : "▴");
+          });
+          histBox.appendChild(histTitle);
+          histBox.appendChild(histList);
+          if (isDeveloperSession) {
+            var clearHistBtn = document.createElement("button");
+            clearHistBtn.className = "btn ghost small";
+            clearHistBtn.style.marginTop = "10px";
+            clearHistBtn.textContent = "Очистить историю нарушений";
+            clearHistBtn.addEventListener("click", async function(){
+              if (!confirm('Удалить всю историю приостановок для "'+emp.name+'"? Это действие необратимо.')) return;
+              await mutateAndSave(function(){ emp.stopHistory = []; });
+              renderAdmin();
+            });
+            histBox.appendChild(clearHistBtn);
+          }
+          empBlock.appendChild(histBox);
+        }
+
+        container.appendChild(empBlock);
+        }
+
   function renderShopsPanel(dept, body){
     if (!Array.isArray(dept.shops)) dept.shops = [];
     var panel = document.createElement("div");
@@ -2395,32 +2816,48 @@
       block.appendChild(membersTitle);
 
       var membersWrap = document.createElement("div");
-      membersWrap.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:6px;";
+      membersWrap.style.cssText = "display:flex;flex-direction:column;gap:2px;margin-bottom:6px;";
       if (shop.employeeIds.length === 0) {
         var noMembers = document.createElement("div");
         noMembers.className = "empty";
-        noMembers.textContent = "В цехе пока нет сотрудников.";
+        noMembers.textContent = "В цехе пока нет сотрудников. Отметьте их галочками в списке подразделения ниже и нажмите «Добавить в цех».";
         membersWrap.appendChild(noMembers);
       }
       shop.employeeIds.slice().forEach(function(empId){
         var e = getEmp(dept, empId);
-        var row = document.createElement("div");
-        row.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13.5px;border-bottom:1px solid var(--line);padding-bottom:4px;";
-        var label = document.createElement("span");
-        label.textContent = e ? e.name : ("Сотрудник удалён (id " + empId + ")");
-        row.appendChild(label);
-        var removeBtn = document.createElement("button");
-        removeBtn.className = "clear-x";
-        removeBtn.textContent = "×";
-        removeBtn.title = "Убрать из цеха";
-        removeBtn.addEventListener("click", async function(){
+        if (!e) {
+          var missingRow = document.createElement("div");
+          missingRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13.5px;border-bottom:1px solid var(--line);padding-bottom:4px;";
+          missingRow.innerHTML = '<span>Сотрудник удалён (id '+escapeHtml(empId)+')</span>';
+          var missingRemoveBtn = document.createElement("button");
+          missingRemoveBtn.className = "clear-x";
+          missingRemoveBtn.textContent = "×";
+          missingRemoveBtn.title = "Убрать из цеха";
+          missingRemoveBtn.addEventListener("click", async function(){
+            await mutateAndSave(function(){
+              shop.employeeIds = shop.employeeIds.filter(function(id){ return id !== empId; });
+            });
+            renderAdmin();
+          });
+          missingRow.appendChild(missingRemoveBtn);
+          membersWrap.appendChild(missingRow);
+          return;
+        }
+        // Каждый сотрудник цеха рендерится тем же компонентом, что и в
+        // общем списке подразделения — со своей полной карточкой СИЗ,
+        // индивидуальными фото-вложениями и т.д. Единственное отличие —
+        // кнопка "Убрать из цеха" в шапке карточки.
+        var removeFromShopBtn = document.createElement("button");
+        removeFromShopBtn.className = "btn ghost small";
+        removeFromShopBtn.textContent = "Убрать из цеха";
+        removeFromShopBtn.title = "Убрать сотрудника из этого цеха (в общий список подразделения). СИЗ-данные не затрагиваются.";
+        removeFromShopBtn.addEventListener("click", async function(){
           await mutateAndSave(function(){
             shop.employeeIds = shop.employeeIds.filter(function(id){ return id !== empId; });
           });
           renderAdmin();
         });
-        row.appendChild(removeBtn);
-        membersWrap.appendChild(row);
+        renderEmpAdminRow(dept, e, membersWrap, { extraHeadButtons: [removeFromShopBtn] });
       });
       block.appendChild(membersWrap);
 
@@ -3361,429 +3798,39 @@
         body.appendChild(bulkPhotoBox);
       }
 
-      if (finalEmployees.length === 0) {
+      var shopMemberIds = {};
+      (dept.shops || []).forEach(function(s){
+        (s.employeeIds || []).forEach(function(id){ shopMemberIds[id] = s.name; });
+      });
+      var isSearching = !!(adminQuery || localDeptQuery);
+      var visibleEmployees = isSearching ? finalEmployees : finalEmployees.filter(function(e){ return !shopMemberIds[e.id]; });
+      var hiddenInShopsCount = finalEmployees.length - visibleEmployees.length;
+
+      if (visibleEmployees.length === 0) {
         var noEmp = document.createElement("div");
         noEmp.className = "empty";
-        noEmp.textContent = (dept.employees.length === 0)
-          ? "В этом подразделении пока нет сотрудников."
-          : "Никого не найдено по этому запросу.";
+        if (dept.employees.length === 0) {
+          noEmp.textContent = "В этом подразделении пока нет сотрудников.";
+        } else if (finalEmployees.length === 0) {
+          noEmp.textContent = "Никого не найдено по этому запросу.";
+        } else {
+          noEmp.textContent = "Все сотрудники этого подразделения распределены по цехам — смотрите панель «Цеха» выше.";
+        }
         body.appendChild(noEmp);
       } else {
         var listHint = document.createElement("div");
         listHint.className = "hint";
         listHint.style.margin = "0 0 8px";
-        listHint.textContent = "Нажмите на сотрудника в списке, чтобы открыть его карточку СИЗ. Цветная точка показывает статус: зелёный — всё в порядке, жёлтый — скоро истекает, красный — просрочено, серый — нет данных.";
+        listHint.textContent = "Нажмите на сотрудника в списке, чтобы открыть его карточку СИЗ. Цветная точка показывает статус: зелёный — всё в порядке, жёлтый — скоро истекает, красный — просрочено, серый — нет данных."
+          + (hiddenInShopsCount > 0 && !isSearching ? " Ещё " + hiddenInShopsCount + " " + pluralPeople(hiddenInShopsCount) + " распределены по цехам — см. панель «Цеха» выше." : "");
         body.appendChild(listHint);
       }
 
-      finalEmployees.forEach(function(emp){
-        var worstCode = worstStatusForEmp(emp);
-        var isSearching = !!(adminQuery || localDeptQuery);
-        var isOpen = !!adminEmpOpen[emp.id] || isSearching;
-
-        // Compact row — this is ALL that shows until the admin clicks the
-        // employee: just a status dot and their ФИО, so a department with
-        // many people stays easy to scan instead of dumping every SIZ table
-        // on screen at once.
-        var compactRow = document.createElement("div");
-        compactRow.className = "emp-row-compact";
-
-        var empSelCbCompact = document.createElement("input");
-        empSelCbCompact.type = "checkbox";
-        empSelCbCompact.style.flexShrink = "0";
-        empSelCbCompact.checked = !!getBulk(dept.id).selected[emp.id];
-        empSelCbCompact.title = "Выбрать для массовых действий";
-        empSelCbCompact.addEventListener("click", function(e){ e.stopPropagation(); });
-        empSelCbCompact.addEventListener("change", function(){
-          var b = getBulk(dept.id);
-          if (empSelCbCompact.checked) b.selected[emp.id] = true; else delete b.selected[emp.id];
-          renderAdmin();
+      visibleEmployees.forEach(function(emp){
+        renderEmpAdminRow(dept, emp, body, {
+          forceOpen: isSearching,
+          shopTag: shopMemberIds[emp.id] || null
         });
-        compactRow.appendChild(empSelCbCompact);
-
-        var dot = document.createElement("span");
-        dot.className = "emp-row-dot " + worstCode;
-        dot.title = worstCode === "danger" ? "Есть просроченные СИЗ" :
-          (worstCode === "warn" ? "Скоро истекает срок СИЗ" :
-          (worstCode === "none" ? "Есть СИЗ без указанной даты" : "Все СИЗ в порядке"));
-        compactRow.appendChild(dot);
-
-        var nameSpan = document.createElement("span");
-        nameSpan.className = "emp-row-name";
-        nameSpan.textContent = emp.name;
-        compactRow.appendChild(nameSpan);
-
-        if (emp.workStop && emp.workStop.active) {
-          var stopTag = document.createElement("span");
-          stopTag.className = "emp-row-stop";
-          stopTag.textContent = "СТОП";
-          compactRow.appendChild(stopTag);
-        }
-
-        var chevron = document.createElement("span");
-        chevron.className = "emp-row-chevron";
-        chevron.textContent = isOpen ? "▴" : "▾";
-        compactRow.appendChild(chevron);
-
-        compactRow.title = "Нажмите, чтобы " + (isOpen ? "свернуть" : "открыть") + " карточку сотрудника";
-        compactRow.addEventListener("click", function(){
-          adminEmpOpen[emp.id] = !adminEmpOpen[emp.id];
-          renderAdmin();
-        });
-        body.appendChild(compactRow);
-
-        if (!isOpen) return; // collapsed — nothing more to render for this person
-
-        var empBlock = document.createElement("div");
-        empBlock.className = "emp-block";
-        var empHead = document.createElement("div");
-        empHead.className = "emp-block-head";
-
-        var empInfoWrap = document.createElement("div");
-        empInfoWrap.style.display = "flex";
-        empInfoWrap.style.alignItems = "flex-start";
-        empInfoWrap.style.gap = "10px";
-
-        var collapseBtn = document.createElement("button");
-        collapseBtn.type = "button";
-        collapseBtn.className = "btn ghost small";
-        collapseBtn.textContent = "▴ Свернуть";
-        collapseBtn.title = "Свернуть карточку сотрудника";
-        collapseBtn.addEventListener("click", function(){
-          adminEmpOpen[emp.id] = false;
-          renderAdmin();
-        });
-        empInfoWrap.appendChild(collapseBtn);
-
-        var clearAllDatesBtn = document.createElement("button");
-        clearAllDatesBtn.type = "button";
-        clearAllDatesBtn.className = "btn ghost small";
-        clearAllDatesBtn.textContent = "Очистить все даты";
-        clearAllDatesBtn.title = "Убрать даты испытания по всем СИЗ у этого сотрудника (фото не удаляются)";
-        clearAllDatesBtn.addEventListener("click", async function(){
-          if (!confirm('Очистить ВСЕ даты СИЗ для "'+emp.name+'"? Это действие необратимо.')) return;
-          await mutateAndSave(function(){
-            SIZ_CATALOG.forEach(function(cat){
-              if (emp.equipment[cat.id]) {
-                delete emp.equipment[cat.id].testDate;
-                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
-                  delete emp.equipment[cat.id];
-                }
-              }
-            });
-          });
-          renderAdmin();
-        });
-        empInfoWrap.appendChild(clearAllDatesBtn);
-
-        var metaBits = [];
-        if (emp.position) metaBits.push(escapeHtml(emp.position));
-        if (emp.tabNumber) metaBits.push("таб. № " + escapeHtml(String(emp.tabNumber)));
-        var empInfoText = document.createElement("div");
-        empInfoText.innerHTML = '<strong>'+escapeHtml(emp.name)+'</strong><div class="meta">'+metaBits.join(" · ")+'</div>';
-        empInfoWrap.appendChild(empInfoText);
-
-        empHead.appendChild(empInfoWrap);
-
-        var personalQrBtn = document.createElement("button");
-        personalQrBtn.className = "btn small";
-        personalQrBtn.textContent = "🔒 Личный QR";
-        personalQrBtn.title = "Показать конфиденциальный QR-код для этого сотрудника";
-        personalQrBtn.addEventListener("click", function(){ openPersonalQrCard(dept, emp); });
-        empHead.appendChild(personalQrBtn);
-
-        var delEmpBtn = document.createElement("button");
-        delEmpBtn.className = "btn danger small";
-        delEmpBtn.textContent = "Удалить сотрудника";
-        delEmpBtn.addEventListener("click", async function(){
-          if (!confirm('Удалить сотрудника "'+emp.name+'"?')) return;
-          await mutateAndSave(function(){
-            dept.employees = dept.employees.filter(function(x){return x.id!==emp.id;});
-          });
-          renderAdmin();
-        });
-        if (isDeveloperSession) empHead.appendChild(delEmpBtn);
-        empBlock.appendChild(empHead);
-
-        var t = document.createElement("table");
-        t.innerHTML = '<thead><tr><th>СИЗ</th><th>Периодичность</th><th>Дата испытания</th><th>Следующая проверка</th><th>Статус</th><th>Фото</th><th></th></tr></thead>';
-        var tb = document.createElement("tbody");
-        SIZ_CATALOG.forEach(function(cat){
-          var rec = emp.equipment[cat.id];
-          var testDate = rec && rec.testDate ? rec.testDate : "";
-          var st = statusForDate(testDate || null, cat.months);
-          var tr = document.createElement("tr");
-          if (st.code === "danger" || st.code === "warn" || st.code === "ok") tr.className = "row-" + st.code;
-          var tdName = document.createElement("td");
-          tdName.textContent = cat.name;
-          var tdMonths = document.createElement("td");
-          tdMonths.className = "siz-row-months";
-          tdMonths.textContent = cat.months + " мес.";
-          var tdDate = document.createElement("td");
-          var dateInput = document.createElement("input");
-          dateInput.type = "date";
-          dateInput.className = "siz-date-input";
-          dateInput.value = testDate;
-          var tdNext = document.createElement("td");
-          tdNext.textContent = st.next ? fmtDate(st.next) : "—";
-          var tdStatus = document.createElement("td");
-          var badge = document.createElement("span");
-          badge.className = "badge " + st.code;
-          badge.textContent = st.label;
-          tdStatus.appendChild(badge);
-          var tdClear = document.createElement("td");
-          var clearBtn = document.createElement("button");
-          clearBtn.className = "clear-x";
-          clearBtn.textContent = "×";
-          clearBtn.title = "Очистить дату";
-          clearBtn.addEventListener("click", async function(){
-            await mutateAndSave(function(){
-              // Only clear the test date — keep any attached violation photos.
-              if (emp.equipment[cat.id]) {
-                delete emp.equipment[cat.id].testDate;
-                if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
-                  delete emp.equipment[cat.id];
-                }
-              }
-            });
-            renderAdmin();
-          });
-          tdClear.appendChild(clearBtn);
-
-          dateInput.addEventListener("change", async function(){
-            await mutateAndSave(function(){
-              if (!dateInput.value) {
-                if (emp.equipment[cat.id]) {
-                  delete emp.equipment[cat.id].testDate;
-                  if (!emp.equipment[cat.id].photos || emp.equipment[cat.id].photos.length === 0) {
-                    delete emp.equipment[cat.id];
-                  }
-                }
-              } else {
-                if (!emp.equipment[cat.id]) emp.equipment[cat.id] = {};
-                emp.equipment[cat.id].testDate = dateInput.value;
-              }
-            });
-            renderAdmin();
-          });
-          tdDate.appendChild(dateInput);
-
-          // ---- Photo cell: view attached violation photos and add new ones
-          // (e.g. wrong type of side cutters, tool not replaced, etc.) ----
-          var tdPhoto = document.createElement("td");
-          tdPhoto.className = "siz-photo-cell";
-          var photos = (rec && rec.photos) ? rec.photos : [];
-          photos.forEach(function(ph, phIdx){
-            var thumbWrap = document.createElement("div");
-            thumbWrap.className = "photo-thumb-wrap";
-
-            var thumbBtn = document.createElement("button");
-            thumbBtn.type = "button";
-            thumbBtn.className = "photo-thumb-btn";
-            thumbBtn.innerHTML = '<img src="'+ph.dataUrl+'" class="photo-thumb-img">';
-            thumbBtn.title = ph.note || "Просмотреть фото";
-            thumbBtn.addEventListener("click", function(){
-              openPhotoLightbox(photos, phIdx, {
-                onDelete: async function(photoId){
-                  await mutateAndSave(function(){
-                    var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
-                    if (arr) {
-                      var i = arr.findIndex(function(x){ return x.id === photoId; });
-                      if (i !== -1) arr.splice(i,1);
-                    }
-                  });
-                  renderAdmin();
-                }
-              });
-            });
-            thumbWrap.appendChild(thumbBtn);
-
-            // Explicit, always-visible delete button — no need to open the
-            // full-screen viewer first to remove a photo.
-            var delX = document.createElement("button");
-            delX.type = "button";
-            delX.className = "photo-thumb-delete";
-            delX.title = "Удалить это фото";
-            delX.textContent = "×";
-            delX.addEventListener("click", async function(e){
-              e.stopPropagation();
-              if (!confirm("Удалить это фото?")) return;
-              await mutateAndSave(function(){
-                var arr = emp.equipment[cat.id] && emp.equipment[cat.id].photos;
-                if (arr) {
-                  var i = arr.findIndex(function(x){ return x.id === ph.id; });
-                  if (i !== -1) arr.splice(i,1);
-                }
-              });
-              renderAdmin();
-            });
-            thumbWrap.appendChild(delX);
-
-            tdPhoto.appendChild(thumbWrap);
-          });
-          var addPhotoBtn = document.createElement("button");
-          addPhotoBtn.type = "button";
-          addPhotoBtn.className = "btn small photo-add-btn";
-          addPhotoBtn.textContent = photos.length > 0 ? "+" : "📷 Фото";
-          addPhotoBtn.title = "Прикрепить фото (например: СИЗ не того типа, инструмент не заменён)";
-          var photoFileInput = document.createElement("input");
-          photoFileInput.type = "file";
-          photoFileInput.accept = "image/*";
-          photoFileInput.capture = "environment";
-          photoFileInput.style.display = "none";
-          addPhotoBtn.addEventListener("click", function(){ photoFileInput.click(); });
-          photoFileInput.addEventListener("change", async function(){
-            var file = photoFileInput.files && photoFileInput.files[0];
-            photoFileInput.value = "";
-            if (!file) return;
-            var note = prompt("Комментарий к фото (необязательно), например: «Бокорезы не того типа» или «Инструмент не заменён»:") || "";
-            var compressed;
-            try {
-              compressed = await compressImageFile(file, 1280, 0.72);
-            } catch(e){
-              showToast("Не удалось обработать фото.", true);
-              return;
-            }
-            showToast("Загрузка фото в Google Drive…", false);
-            var driveUrl;
-            try {
-              driveUrl = await uploadPhotoToDrive(compressed, "siz_" + uid() + ".jpg");
-            } catch(e){
-              showToast("Не удалось загрузить фото в Google Drive.", true);
-              return;
-            }
-            await mutateAndSave(function(){
-              var arr = ensurePhotosArr(emp, cat.id);
-              arr.push({ id: uid(), dataUrl: driveUrl, note: note.trim(), addedAt: new Date().toISOString() });
-            });
-            renderAdmin();
-          });
-          tdPhoto.appendChild(addPhotoBtn);
-          tdPhoto.appendChild(photoFileInput);
-
-          tr.appendChild(tdName);
-          tr.appendChild(tdMonths);
-          tr.appendChild(tdDate);
-          tr.appendChild(tdNext);
-          tr.appendChild(tdStatus);
-          tr.appendChild(tdPhoto);
-          tr.appendChild(tdClear);
-          tb.appendChild(tr);
-        });
-        t.appendChild(tb);
-        empBlock.appendChild(t);
-
-        var stopBox = document.createElement("div");
-        stopBox.className = "stop-work-box" + ((emp.workStop && emp.workStop.active) ? " active" : "");
-        if (emp.workStop && emp.workStop.active) {
-          var stopIconEl = document.createElement("div");
-          stopIconEl.className = "stop-icon-img";
-          stopBox.appendChild(stopIconEl);
-          var stopContent = document.createElement("div");
-          var wd = new Date(emp.workStop.date);
-          var wdStr = isNaN(wd.getTime()) ? emp.workStop.date : wd.toLocaleString("ru-RU");
-          stopContent.innerHTML =
-            '<div class="stop-work-title">⛔ РАБОТЫ ПРИОСТАНОВЛЕНЫ</div>'+
-            '<div class="stop-work-reason">'+escapeHtml(emp.workStop.reason)+'</div>'+
-            '<div class="stop-work-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(wdStr)+'</div>';
-          stopBox.appendChild(stopContent);
-          if (isDeveloperSession) {
-            var liftBtn = document.createElement("button");
-            liftBtn.className = "btn ghost small";
-            liftBtn.textContent = "Снять запрет";
-            liftBtn.style.marginTop = "10px";
-            liftBtn.style.flexShrink = "0";
-            liftBtn.addEventListener("click", async function(){
-              if (!confirm('Снять запрет на работы для "'+emp.name+'"?')) return;
-              var liftedBy = prompt("Ваше ФИО (кто снимает запрет):");
-              await mutateAndSave(function(){ liftWorkStop(emp, liftedBy ? liftedBy.trim() : ""); });
-              renderAdmin();
-            });
-            stopContent.appendChild(liftBtn);
-          } else {
-            var note = document.createElement("div");
-            note.className = "hint";
-            note.style.marginTop = "8px";
-            note.textContent = "Снять запрет может только разработчик.";
-            stopContent.appendChild(note);
-          }
-        } else {
-          var stopBtn = document.createElement("button");
-          stopBtn.className = "btn danger small";
-          stopBtn.textContent = "Остановить работы (нарушение СИЗ / опасные условия)";
-          stopBtn.addEventListener("click", async function(){
-            var who = prompt("ФИО приостанавливающего работы:");
-            var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
-            if (!reason || !reason.trim()) return;
-            await mutateAndSave(function(){
-              startWorkStop(emp, reason.trim(), who ? who.trim() : "");
-            });
-            renderAdmin();
-          });
-          stopBox.appendChild(stopBtn);
-        }
-        empBlock.appendChild(stopBox);
-
-        if (emp.stopHistory && emp.stopHistory.length > 0) {
-          var histBox = document.createElement("div");
-          histBox.className = "stop-work-box";
-          histBox.style.display = "block";
-          var histCount = emp.stopHistory.length;
-          var histTitle = document.createElement("div");
-          histTitle.style.fontWeight = "700";
-          histTitle.style.fontSize = "13.5px";
-          histTitle.style.marginBottom = "8px";
-          histTitle.style.cursor = "pointer";
-          histTitle.textContent = "История приостановок (" + histCount + ") ▾";
-          var histList = document.createElement("div");
-          histList.style.display = "none";
-          histList.style.flexDirection = "column";
-          histList.style.gap = "8px";
-          emp.stopHistory.slice().reverse().forEach(function(rec){
-            var hd1 = new Date(rec.dateStarted);
-            var hd1Str = isNaN(hd1.getTime()) ? rec.dateStarted : hd1.toLocaleString("ru-RU");
-            var row = document.createElement("div");
-            row.style.fontSize = "12.5px";
-            row.style.borderBottom = "1px solid var(--line)";
-            row.style.paddingBottom = "6px";
-            var statusLabel = rec.active
-              ? '<span class="badge danger">Активно</span>'
-              : '<span class="badge ok">Снято</span>';
-            var liftedInfo = "";
-            if (!rec.active && rec.dateLifted) {
-              var hd2 = new Date(rec.dateLifted);
-              var hd2Str = isNaN(hd2.getTime()) ? rec.dateLifted : hd2.toLocaleString("ru-RU");
-              liftedInfo = '<br>Снято: <b>'+escapeHtml(rec.liftedBy || "не указано")+'</b> · '+escapeHtml(hd2Str);
-            }
-            row.innerHTML =
-              statusLabel + ' ' + escapeHtml(rec.reason) + '<br>'+
-              'Остановил: <b>'+escapeHtml(rec.stoppedBy || "не указано")+'</b> · '+escapeHtml(hd1Str) +
-              liftedInfo;
-            histList.appendChild(row);
-          });
-          histTitle.addEventListener("click", function(){
-            var open = histList.style.display !== "none";
-            histList.style.display = open ? "none" : "flex";
-            histTitle.textContent = "История приостановок (" + histCount + ") " + (open ? "▾" : "▴");
-          });
-          histBox.appendChild(histTitle);
-          histBox.appendChild(histList);
-          if (isDeveloperSession) {
-            var clearHistBtn = document.createElement("button");
-            clearHistBtn.className = "btn ghost small";
-            clearHistBtn.style.marginTop = "10px";
-            clearHistBtn.textContent = "Очистить историю нарушений";
-            clearHistBtn.addEventListener("click", async function(){
-              if (!confirm('Удалить всю историю приостановок для "'+emp.name+'"? Это действие необратимо.')) return;
-              await mutateAndSave(function(){ emp.stopHistory = []; });
-              renderAdmin();
-            });
-            histBox.appendChild(clearHistBtn);
-          }
-          empBlock.appendChild(histBox);
-        }
-
-        body.appendChild(empBlock);
       });
 
       item.appendChild(body);
