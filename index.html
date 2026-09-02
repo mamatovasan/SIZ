@@ -4413,8 +4413,8 @@
   // ---------- Init ----------
   (async function init(){
     document.getElementById("view-check").innerHTML = '<div class="loading">Загрузка…</div>';
-    await loadData();
-    await loadPin();
+  await Promise.all([loadData(),
+    loadPin()]);                 
     applyHash();
     if (personalMode) {
       // Confidential personal-QR mode: hide the header/tabs entirely so the
