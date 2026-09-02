@@ -1816,6 +1816,7 @@
   // personal QR code: just the SIZ expiry list and the stop/start-work
   // control — no tabs, no PIN, no admin/editor UI, nothing else.
   function renderPersonalMinimal(root){
+    root.innerHTML = "";
     var dept = getDept(check.empDeptId);
     var emp = dept ? getEmp(dept, check.empId) : null;
     if (!dept || !emp) {
