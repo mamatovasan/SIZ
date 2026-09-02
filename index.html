@@ -1674,12 +1674,12 @@
     var textWrap = document.createElement("div");
     textWrap.style.width = "100%";
     if (stopList.length === 0) {
-      textWrap.innerHTML = '<div class="stop-count-text">Приостановленных работ нет</div>';
+      textWrap.innerHTML = '<div class="stop-count-text">Выявленных нарушений нет</div>';
       panel.appendChild(textWrap);
     } else {
       var titleEl = document.createElement("div");
       titleEl.className = "stop-count-text";
-      titleEl.textContent = "Приостановлено работ: " + stopList.length;
+      titleEl.textContent = "Выявлено нарушений: " + stopList.length;
       textWrap.appendChild(titleEl);
       var namesWrap = document.createElement("div");
       namesWrap.className = "stop-count-names";
