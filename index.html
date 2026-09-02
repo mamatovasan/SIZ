@@ -541,6 +541,8 @@
   var adminSearchFocused = false;
   var deptSearchQuery = {}; // deptId -> string
   var deptSearchFocusedId = null;
+  var adminFolderOpen = {}; // folderId -> bool — whether a folder card is expanded in "Управление"
+  var folderUploadState = {}; // folderId -> { uploading: bool }
 
   function getBulk(deptId){
     if (!bulkState[deptId]) {
@@ -735,6 +737,14 @@
       d.defectActs = [];
       changed = true;
     }
+    // ---- Папки: произвольные группы сотрудников (обычно "отдел"/участок),
+    // не привязанные к структуре подразделений, для которых можно приложить
+    // общий документ. Документ виден всем сотрудникам папки на их личной
+    // странице (по личному QR-коду). ----
+    if (!Array.isArray(d.folders)) {
+      d.folders = [];
+      changed = true;
+    }
     return changed;
   }
 
@@ -747,6 +757,26 @@
       }
     }
     return null;
+  }
+
+  // ---------- Папки с общими документами для группы сотрудников ----------
+
+  function getEmployeeFolders(empId){
+    if (!data || !Array.isArray(data.folders)) return [];
+    return data.folders.filter(function(f){
+      return Array.isArray(f.employeeIds) && f.employeeIds.indexOf(empId) !== -1;
+    });
+  }
+
+  // Reads any file (PDF, Word, Excel, image, etc.) as a base64 data: URL,
+  // without the image-only recompression used for СИЗ violation photos.
+  function readFileAsDataUrl(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onerror = function(){ reject(new Error("Не удалось прочитать файл")); };
+      reader.onload = function(){ resolve(reader.result); };
+      reader.readAsDataURL(file);
+    });
   }
 
   // ---------- Defect acts (дефектные акты на СИЗ / инструмент) ----------
@@ -1779,6 +1809,41 @@
     defectStatusPanel.appendChild(defectStatusText);
     panel.appendChild(defectStatusPanel);
 
+    // ---- Общие документы папок, в которые включён этот сотрудник (см.
+    // "Управление" → "Папки"). Видны только здесь, на личной странице по
+    // QR-коду, и только тем, кто состоит в соответствующей папке. ----
+    var myFolders = getEmployeeFolders(emp.id).filter(function(f){ return (f.documents || []).length > 0; });
+    if (myFolders.length > 0) {
+      var foldersPanel = document.createElement("div");
+      foldersPanel.className = "panel";
+      foldersPanel.style.marginBottom = "14px";
+      var foldersTitle = document.createElement("div");
+      foldersTitle.style.cssText = "font-weight:700;margin-bottom:10px;font-size:15px;";
+      foldersTitle.textContent = "📁 Документы отдела";
+      foldersPanel.appendChild(foldersTitle);
+      myFolders.forEach(function(folder){
+        var groupWrap = document.createElement("div");
+        groupWrap.style.marginBottom = "10px";
+        var groupLabel = document.createElement("div");
+        groupLabel.className = "hint";
+        groupLabel.style.marginBottom = "6px";
+        groupLabel.textContent = folder.name + ":";
+        groupWrap.appendChild(groupLabel);
+        folder.documents.forEach(function(doc){
+          var dlink = document.createElement("a");
+          dlink.href = doc.url;
+          dlink.target = "_blank";
+          dlink.rel = "noopener";
+          dlink.className = "btn ghost small";
+          dlink.style.cssText = "display:inline-flex;align-items:center;gap:6px;margin:0 8px 8px 0;text-decoration:none;";
+          dlink.textContent = "📄 " + doc.name;
+          groupWrap.appendChild(dlink);
+        });
+        foldersPanel.appendChild(groupWrap);
+      });
+      panel.appendChild(foldersPanel);
+    }
+
     if (emp.workStop && emp.workStop.active) {
       var stopBanner = document.createElement("div");
       stopBanner.className = "stop-banner";
@@ -2144,6 +2209,15 @@
     return "сотрудников";
   }
 
+  function pluralDocs(n){
+    var m = n % 100;
+    if (m >= 11 && m <= 14) return "документов";
+    var l = n % 10;
+    if (l === 1) return "документ";
+    if (l >= 2 && l <= 4) return "документа";
+    return "документов";
+  }
+
   function escapeHtml(s){
     var d = document.createElement("div");
     d.textContent = (s === undefined || s === null) ? "" : s;
@@ -2231,6 +2305,208 @@
       if (order[st.code] > order[worst]) worst = st.code;
     });
     return worst;
+  }
+
+  // ---- Панель "Папки": сотрудники нескольких (или одного) подразделений,
+  // сгруппированные вручную, с общими документами (протоколы измерений,
+  // акты проверки СИЗ/стремянок и т.п.), видимыми всем членам папки на их
+  // личной странице по QR-коду. Чтобы наполнить папку — отметьте сотрудников
+  // галочками в списке подразделения ниже и используйте выпадающий список
+  // "Добавить выбранных в папку" в блоке массовых действий.
+  function renderFoldersPanel(root){
+    var panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML =
+      '<h2 style="font-size:18px;margin-bottom:6px;">📁 Папки — общие документы на отдел</h2>'+
+      '<p class="hint" style="margin-bottom:14px;">Соберите нужных сотрудников (например, весь ЦРК) в папку и приложите к ней общий документ — протокол измерений, акт проверки стремянки и т.д. Документ появится в личном кабинете (по личному QR-коду) у каждого сотрудника из этой папки. Чтобы добавить сотрудников в папку — отметьте их галочками в списке подразделения ниже и нажмите «Добавить в папку».</p>';
+
+    var folders = Array.isArray(data.folders) ? data.folders : [];
+    if (folders.length === 0) {
+      var emptyEl = document.createElement("div");
+      emptyEl.className = "empty";
+      emptyEl.textContent = "Пока нет ни одной папки. Отметьте сотрудников галочками ниже и создайте первую.";
+      panel.appendChild(emptyEl);
+    }
+
+    folders.forEach(function(folder){
+      if (!Array.isArray(folder.employeeIds)) folder.employeeIds = [];
+      if (!Array.isArray(folder.documents)) folder.documents = [];
+      var isOpen = !!adminFolderOpen[folder.id];
+
+      var head = document.createElement("div");
+      head.className = "emp-row-compact";
+      var nameSpan = document.createElement("span");
+      nameSpan.className = "emp-row-name";
+      nameSpan.textContent = "📁 " + folder.name + " — " + folder.employeeIds.length + " " + pluralPeople(folder.employeeIds.length) + ", " + folder.documents.length + " " + pluralDocs(folder.documents.length);
+      head.appendChild(nameSpan);
+      var chevron = document.createElement("span");
+      chevron.className = "emp-row-chevron";
+      chevron.textContent = isOpen ? "▴" : "▾";
+      head.appendChild(chevron);
+      head.title = "Нажмите, чтобы " + (isOpen ? "свернуть" : "открыть") + " папку";
+      head.addEventListener("click", function(){
+        adminFolderOpen[folder.id] = !adminFolderOpen[folder.id];
+        renderAdmin();
+      });
+      panel.appendChild(head);
+
+      if (!isOpen) return;
+
+      var block = document.createElement("div");
+      block.className = "emp-block";
+
+      var renameRow = document.createElement("div");
+      renameRow.className = "row";
+      renameRow.innerHTML = '<div class="field" style="margin-bottom:0;flex:1;min-width:220px;"><label>Название папки</label><input type="text" class="folder-rename-input" value="'+escapeHtml(folder.name)+'"></div>';
+      var renameBtn = document.createElement("button");
+      renameBtn.className = "btn ghost small";
+      renameBtn.textContent = "Сохранить название";
+      renameBtn.addEventListener("click", async function(){
+        var val = renameRow.querySelector(".folder-rename-input").value.trim();
+        if (!val) return;
+        await mutateAndSave(function(){ folder.name = val; });
+        renderAdmin();
+      });
+      renameRow.appendChild(renameBtn);
+      var delFolderBtn = document.createElement("button");
+      delFolderBtn.className = "btn danger small";
+      delFolderBtn.textContent = "Удалить папку";
+      delFolderBtn.title = "Удалить папку и все документы в ней. Сами сотрудники и их СИЗ-данные не затрагиваются.";
+      delFolderBtn.addEventListener("click", async function(){
+        if (!confirm('Удалить папку "'+folder.name+'" вместе со всеми документами в ней?\n\nСотрудники и их СИЗ-данные при этом не удаляются — пропадёт только эта папка.')) return;
+        await mutateAndSave(function(){
+          data.folders = data.folders.filter(function(f){ return f.id !== folder.id; });
+        });
+        renderAdmin();
+      });
+      renameRow.appendChild(delFolderBtn);
+      block.appendChild(renameRow);
+
+      var membersTitle = document.createElement("div");
+      membersTitle.style.cssText = "font-weight:600;margin:14px 0 6px;font-size:13.5px;";
+      membersTitle.textContent = "Сотрудники в папке (" + folder.employeeIds.length + "):";
+      block.appendChild(membersTitle);
+
+      var membersWrap = document.createElement("div");
+      membersWrap.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:6px;";
+      if (folder.employeeIds.length === 0) {
+        var noMembers = document.createElement("div");
+        noMembers.className = "empty";
+        noMembers.textContent = "В папке пока нет сотрудников.";
+        membersWrap.appendChild(noMembers);
+      }
+      folder.employeeIds.slice().forEach(function(empId){
+        var found = findEmpAnywhere(empId);
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13.5px;border-bottom:1px solid var(--line);padding-bottom:4px;";
+        var label = document.createElement("span");
+        label.textContent = found ? (found.emp.name + " — " + found.dept.name) : ("Сотрудник удалён (id " + empId + ")");
+        row.appendChild(label);
+        var removeBtn = document.createElement("button");
+        removeBtn.className = "clear-x";
+        removeBtn.textContent = "×";
+        removeBtn.title = "Убрать из папки";
+        removeBtn.addEventListener("click", async function(){
+          await mutateAndSave(function(){
+            folder.employeeIds = folder.employeeIds.filter(function(id){ return id !== empId; });
+          });
+          renderAdmin();
+        });
+        row.appendChild(removeBtn);
+        membersWrap.appendChild(row);
+      });
+      block.appendChild(membersWrap);
+
+      var docsTitle = document.createElement("div");
+      docsTitle.style.cssText = "font-weight:600;margin:16px 0 6px;font-size:13.5px;";
+      docsTitle.textContent = "Общие документы (видны всем в этой папке по личному QR-коду):";
+      block.appendChild(docsTitle);
+
+      var docsWrap = document.createElement("div");
+      docsWrap.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:10px;";
+      if (folder.documents.length === 0) {
+        var noDocs = document.createElement("div");
+        noDocs.className = "empty";
+        noDocs.textContent = "Документов пока нет.";
+        docsWrap.appendChild(noDocs);
+      }
+      folder.documents.slice().forEach(function(doc){
+        var drow = document.createElement("div");
+        drow.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13.5px;border-bottom:1px solid var(--line);padding-bottom:4px;";
+        var dlink = document.createElement("a");
+        dlink.href = doc.url;
+        dlink.target = "_blank";
+        dlink.rel = "noopener";
+        dlink.textContent = "📄 " + doc.name;
+        drow.appendChild(dlink);
+        var ddel = document.createElement("button");
+        ddel.className = "clear-x";
+        ddel.textContent = "×";
+        ddel.title = "Удалить документ";
+        ddel.addEventListener("click", async function(){
+          if (!confirm('Удалить документ "'+doc.name+'" из папки?')) return;
+          await mutateAndSave(function(){
+            folder.documents = folder.documents.filter(function(x){ return x.id !== doc.id; });
+          });
+          renderAdmin();
+        });
+        drow.appendChild(ddel);
+        docsWrap.appendChild(drow);
+      });
+      block.appendChild(docsWrap);
+
+      var addDocRow = document.createElement("div");
+      addDocRow.className = "row";
+      var addDocField = document.createElement("div");
+      addDocField.className = "field";
+      addDocField.style.cssText = "margin-bottom:0;flex:1;min-width:260px;";
+      addDocField.innerHTML = '<label>Добавить документ (фото, PDF, Word, Excel и т.д.)</label>';
+      var docInner = document.createElement("div");
+      docInner.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
+      var docFileInput = document.createElement("input");
+      docFileInput.type = "file";
+      var docStatus = document.createElement("span");
+      docStatus.className = "hint";
+      var fuState = folderUploadState[folder.id] || {};
+      if (fuState.uploading) docStatus.textContent = "Загрузка в Google Drive…";
+      docFileInput.disabled = !!fuState.uploading;
+      docFileInput.addEventListener("change", async function(){
+        var file = docFileInput.files && docFileInput.files[0];
+        if (!file) return;
+        var dataUrl;
+        try {
+          dataUrl = (file.type && file.type.indexOf("image/") === 0)
+            ? await compressImageFile(file, 1600, 0.82)
+            : await readFileAsDataUrl(file);
+        } catch(e){
+          showToast("Не удалось прочитать файл.", true);
+          return;
+        }
+        folderUploadState[folder.id] = { uploading: true };
+        renderAdmin();
+        try {
+          var url = await uploadPhotoToDrive(dataUrl, file.name);
+          await mutateAndSave(function(){
+            if (!Array.isArray(folder.documents)) folder.documents = [];
+            folder.documents.push({ id: uid(), name: file.name, url: url, addedAt: new Date().toISOString() });
+          });
+          showToast("Документ добавлен в папку «"+folder.name+"».", false);
+        } catch(e){
+          showToast("Не удалось загрузить документ в Google Drive.", true);
+        }
+        folderUploadState[folder.id] = { uploading: false };
+        renderAdmin();
+      });
+      docInner.appendChild(docFileInput);
+      docInner.appendChild(docStatus);
+      addDocField.appendChild(docInner);
+      addDocRow.appendChild(addDocField);
+      block.appendChild(addDocRow);
+
+      panel.appendChild(block);
+    });
+
+    root.appendChild(panel);
   }
 
   function renderAdminContent(root){
@@ -2544,6 +2820,8 @@
     addCatRow.appendChild(addCatBtn);
     catalogPanel.appendChild(addCatRow);
     root.appendChild(catalogPanel);
+
+    renderFoldersPanel(root);
 
     var addPanel = document.createElement("div");
     addPanel.className = "panel";
@@ -2877,6 +3155,76 @@
         selectAllText.textContent = "Выбрать всех сотрудников подразделения";
         selectAllWrap.appendChild(selectAllText);
         bulkBox.appendChild(selectAllWrap);
+
+        // ---- Добавление отмеченных сотрудников в папку с общими
+        // документами (см. панель "Папки" выше). Не связано с датами СИЗ —
+        // просто переносит выбранных людей в группу, для которой можно
+        // прикрепить общий документ, видимый всем в этой группе на их
+        // личной странице. ----
+        var folderMoveRow = document.createElement("div");
+        folderMoveRow.className = "row";
+        folderMoveRow.style.marginTop = "14px";
+        folderMoveRow.style.borderTop = "1px dashed var(--line)";
+        folderMoveRow.style.paddingTop = "14px";
+
+        var folderMoveField = document.createElement("div");
+        folderMoveField.className = "field";
+        folderMoveField.style.marginBottom = "0";
+        folderMoveField.style.minWidth = "260px";
+        folderMoveField.innerHTML = '<label>📁 Добавить выбранных в папку</label>';
+        var folderSelect = document.createElement("select");
+        folderSelect.style.width = "100%";
+        var newFolderOpt = document.createElement("option");
+        newFolderOpt.value = "__new__";
+        newFolderOpt.textContent = "+ Новая папка…";
+        folderSelect.appendChild(newFolderOpt);
+        (data.folders || []).forEach(function(f){
+          var opt = document.createElement("option");
+          opt.value = f.id;
+          opt.textContent = f.name + " (" + ((f.employeeIds || []).length) + ")";
+          folderSelect.appendChild(opt);
+        });
+        folderMoveField.appendChild(folderSelect);
+        folderMoveRow.appendChild(folderMoveField);
+
+        var moveToFolderBtn = document.createElement("button");
+        moveToFolderBtn.className = "btn";
+        moveToFolderBtn.textContent = "Добавить в папку (" + bulkSelCount + ")";
+        moveToFolderBtn.disabled = bulkSelCount === 0;
+        moveToFolderBtn.title = "Отмеченные галочками сотрудники будут добавлены в выбранную (или новую) папку. Из подразделения они при этом никуда не денутся.";
+        moveToFolderBtn.addEventListener("click", async function(){
+          var ids = Object.keys(bulk.selected).filter(function(id){ return bulk.selected[id]; });
+          if (ids.length === 0) return;
+          var targetId = folderSelect.value;
+          var newName = "";
+          if (targetId === "__new__") {
+            newName = prompt("Название новой папки (например, «ЦРК» или «Протокол стремянок ЦРК»):");
+            if (!newName || !newName.trim()) return;
+            newName = newName.trim();
+          }
+          var resultFolderName = "";
+          await mutateAndSave(function(){
+            if (!Array.isArray(data.folders)) data.folders = [];
+            var folder;
+            if (targetId === "__new__") {
+              folder = { id: uid(), name: newName, employeeIds: [], documents: [] };
+              data.folders.push(folder);
+            } else {
+              folder = data.folders.find(function(f){ return f.id === targetId; });
+            }
+            if (!folder) return;
+            if (!Array.isArray(folder.employeeIds)) folder.employeeIds = [];
+            ids.forEach(function(id){
+              if (folder.employeeIds.indexOf(id) === -1) folder.employeeIds.push(id);
+            });
+            resultFolderName = folder.name;
+          });
+          bulk.selected = {};
+          showToast(resultFolderName ? ('Добавлено в папку «'+resultFolderName+'».') : "Добавлено в папку.", false);
+          renderAdmin();
+        });
+        folderMoveRow.appendChild(moveToFolderBtn);
+        bulkBox.appendChild(folderMoveRow);
 
         body.appendChild(bulkBox);
 
