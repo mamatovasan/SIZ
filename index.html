@@ -6,8 +6,12 @@
 <title>Проверка СИЗ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- defer: страница не должна ждать загрузку этих библиотек, чтобы
+     показать данные. Они нужны только когда открывают вкладки
+     "Печать QR" / "Личные QR" или нажимают кнопки экспорта в Excel,
+     а к этому моменту скрипты уже успевают догрузиться в фоне. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 <style>
   :root{
     --bg:#E4F1FA;
@@ -1320,36 +1324,52 @@
 
   async function loadData(){
     readError = false;
+    var res = null, dataErr = null;
     try {
-      var res = await getWithRetry(DATA_KEY, 3);
-      if (res && res.value) {
-        data = ensureSizCatalog(migrateEquipment(JSON.parse(res.value)));
-        if (ensureAccessTokens(data)) {
-          // Silently persist newly-minted personal tokens (best-effort;
-          // if it fails, tokens still work for this session).
-          saveData().catch(function(){});
-        }
-        return;
+      res = await getWithRetry(DATA_KEY, 3);
+    } catch(e){ dataErr = e; }
+
+    if (res && res.value) {
+      data = ensureSizCatalog(migrateEquipment(JSON.parse(res.value)));
+      if (ensureAccessTokens(data)) {
+        // Silently persist newly-minted personal tokens (best-effort;
+        // if it fails, tokens still work for this session).
+        saveData().catch(function(){});
       }
-    } catch(e){
-      // Reading the main data failed even after retries. Before assuming
-      // "this is a brand-new instance", check the initialization marker —
-      // if the marker exists, real data exists too and this is just a
-      // connection problem, so we must NOT overwrite it with the seed.
-      try {
-        var marker = await getWithRetry(MARKER_KEY, 2);
-        if (marker && marker.value) {
-          readError = true;
-          data = ensureSizCatalog(seedData()); // shown temporarily, NOT saved
-          ensureAccessTokens(data);
-          return;
-        }
-      } catch(e2){
-        // marker also unreadable — fall through to first-run handling below,
-        // since this looks like a genuinely fresh, never-initialized instance.
-      }
+      return;
     }
-    // Genuinely first run: seed once and record the marker.
+
+    // DATA_KEY came back empty or failed outright. Previously this branch
+    // could mistake a transient hiccup for "brand-new instance" and
+    // silently overwrite real data (and everyone's personal QR tokens)
+    // with a fresh seed. Now we NEVER do that unless we can positively
+    // confirm — with zero errors — that neither key has ever been set.
+    var marker = null, markerErr = null;
+    try {
+      marker = await getWithRetry(MARKER_KEY, 2);
+    } catch(e2){ markerErr = e2; }
+
+    if (marker && marker.value) {
+      // Marker exists, so real data exists too — this is just a read
+      // problem. Show a temporary placeholder, do NOT save it.
+      readError = true;
+      data = ensureSizCatalog(seedData());
+      ensureAccessTokens(data);
+      return;
+    }
+
+    if (dataErr || markerErr) {
+      // Could not positively confirm this is a fresh instance — treat as
+      // an ambiguous read failure, never as "first run". Show a temporary
+      // placeholder, do NOT save it.
+      readError = true;
+      data = ensureSizCatalog(seedData());
+      ensureAccessTokens(data);
+      return;
+    }
+
+    // Only reached when both keys were read successfully and are
+    // confirmed empty, with no errors anywhere: genuinely first run.
     data = ensureSizCatalog(seedData());
     ensureAccessTokens(data);
     var ok = await saveData();
@@ -4413,8 +4433,8 @@
   // ---------- Init ----------
   (async function init(){
     document.getElementById("view-check").innerHTML = '<div class="loading">Загрузка…</div>';
-  await Promise.all([loadData(),
-    loadPin()]);                 
+    // Данные и PIN не зависят друг от друга — грузим параллельно, а не по очереди.
+    await Promise.all([loadData(), loadPin()]);
     applyHash();
     if (personalMode) {
       // Confidential personal-QR mode: hide the header/tabs entirely so the
