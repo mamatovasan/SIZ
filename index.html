@@ -1844,21 +1844,29 @@
         groupWrap.appendChild(groupLabel);
         shop.documents.forEach(function(doc){
           var docRow = document.createElement("div");
-          docRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;";
+          docRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;";
 
           // Только скачивание — отдаёт файл целиком, как он есть, без
           // онлайн-просмотра (который на некоторых телефонах открывал
-          // только первую страницу многостраничного PDF).
+          // только первую страницу многостраничного PDF). Атрибут download
+          // просит браузер сохранить файл, а не открывать его.
           var ddownload = document.createElement("a");
           ddownload.href = driveDirectDownloadUrl(doc.url);
           ddownload.target = "_blank";
           ddownload.rel = "noopener";
+          ddownload.download = doc.name || "";
           ddownload.className = "btn accent small";
           ddownload.style.cssText = "display:inline-flex;align-items:center;gap:6px;text-decoration:none;";
           ddownload.textContent = "⬇ Скачать: " + doc.name;
           docRow.appendChild(ddownload);
 
           groupWrap.appendChild(docRow);
+
+          var dlHint = document.createElement("div");
+          dlHint.className = "hint";
+          dlHint.style.cssText = "margin:0 0 10px;";
+          dlHint.textContent = "Если файл открылся для просмотра, а не сохранился в телефон — нажмите значок «⬇ скачать» вверху экрана просмотра, либо зажмите кнопку выше пальцем и выберите «Скачать ссылку».";
+          groupWrap.appendChild(dlHint);
         });
         shopsPanel.appendChild(groupWrap);
       });
@@ -2927,11 +2935,13 @@
         drow.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;border-bottom:1px solid var(--line);padding-bottom:6px;";
         // Только скачивание — отдаёт файл целиком, как он есть, без
         // онлайн-просмотра (который на некоторых телефонах открывал только
-        // первую страницу многостраничного PDF).
+        // первую страницу многостраничного PDF). Атрибут download просит
+        // браузер сохранить файл, а не открывать его.
         var ddownload = document.createElement("a");
         ddownload.href = driveDirectDownloadUrl(doc.url);
         ddownload.target = "_blank";
         ddownload.rel = "noopener";
+        ddownload.download = doc.name || "";
         ddownload.className = "btn ghost small";
         ddownload.style.textDecoration = "none";
         ddownload.textContent = "⬇ " + doc.name;
