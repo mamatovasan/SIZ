@@ -1785,32 +1785,6 @@
     nameEl.textContent = emp.name;
     panel.appendChild(nameEl);
 
-    // Same green/orange indicator as on the main screen, but scoped to just
-    // this employee's own defect acts (no other tabs exist on this minimal
-    // page, so it needs to be visible right here).
-    var myActs = (data.defectActs || []).filter(function(a){ return a.empId === emp.id; })
-      .sort(function(a,b){ return new Date(b.date) - new Date(a.date); });
-    var defectStatusPanel = document.createElement("div");
-    defectStatusPanel.className = "defect-count-panel" + (myActs.length === 0 ? " zero" : "");
-    defectStatusPanel.style.marginBottom = "14px";
-    var defectStatusIcon = document.createElement("div");
-    defectStatusIcon.className = "defect-count-icon";
-    defectStatusIcon.textContent = myActs.length === 0 ? "✅" : "🛠";
-    defectStatusPanel.appendChild(defectStatusIcon);
-    var defectStatusText = document.createElement("div");
-    defectStatusText.style.width = "100%";
-    if (myActs.length === 0) {
-      defectStatusText.innerHTML = '<div class="defect-count-text">Дефектных актов нет</div>';
-    } else {
-      defectStatusText.innerHTML = '<div class="defect-count-text">Ваших дефектных актов: ' + myActs.length + '</div>';
-      var myActsNames = document.createElement("div");
-      myActsNames.className = "defect-count-names";
-      myActsNames.textContent = myActs.map(function(a){ return a.toolName; }).join(", ");
-      defectStatusText.appendChild(myActsNames);
-    }
-    defectStatusPanel.appendChild(defectStatusText);
-    panel.appendChild(defectStatusPanel);
-
     // ---- Общие документы цехов подразделения, в которые включён этот
     // сотрудник (см. "Управление" → карточка подразделения → "Цеха").
     // Видны только здесь, на личной странице по QR-коду, и только тем, кто
@@ -1845,20 +1819,6 @@
         shopsPanel.appendChild(groupWrap);
       });
       panel.appendChild(shopsPanel);
-    }
-
-    if (emp.workStop && emp.workStop.active) {
-      var stopBanner = document.createElement("div");
-      stopBanner.className = "stop-banner";
-      var stopIcon = document.createElement("div");
-      stopIcon.className = "stop-icon-img";
-      stopBanner.appendChild(stopIcon);
-      var stopText = document.createElement("div");
-      stopText.innerHTML =
-        '<div class="stop-banner-title">ДОСТУП К РАБОТАМ ЗАПРЕЩЁН</div>'+
-        '<div class="stop-banner-name">'+escapeHtml(emp.name)+'</div>';
-      stopBanner.appendChild(stopText);
-      panel.appendChild(stopBanner);
     }
 
     var list = document.createElement("div");
@@ -1906,51 +1866,6 @@
       list.appendChild(cardEl);
     });
     panel.appendChild(list);
-
-    if (emp.workStop && emp.workStop.active) {
-      var stopDesc = document.createElement("div");
-      stopDesc.className = "stop-desc";
-      var sd = new Date(emp.workStop.date);
-      var stopDateStr = isNaN(sd.getTime()) ? emp.workStop.date : sd.toLocaleString("ru-RU");
-      stopDesc.innerHTML =
-        '<div class="stop-desc-title">Причина остановки работ</div>'+
-        '<div class="stop-desc-reason">'+escapeHtml(emp.workStop.reason)+'</div>'+
-        '<div class="stop-desc-meta">Остановил: <b>'+escapeHtml(emp.workStop.stoppedBy || "не указано")+'</b> · '+escapeHtml(stopDateStr)+'</div>';
-      panel.appendChild(stopDesc);
-    } else {
-      var stopActionBox = document.createElement("div");
-      stopActionBox.className = "stop-work-box";
-      var stopActionBtn = document.createElement("button");
-      stopActionBtn.className = "btn danger";
-      stopActionBtn.style.width = "100%";
-      stopActionBtn.style.padding = "16px";
-      stopActionBtn.style.fontSize = "16px";
-      stopActionBtn.textContent = "⛔ СТОП — приостановить все виды работ";
-      stopActionBtn.addEventListener("click", async function(){
-        var who = prompt("ФИО приостанавливающего работы:");
-        if (!who || !who.trim()) { showToast("Пожалуйста, укажите ФИО приостанавливающего работы.", true); return; }
-        var reason = prompt("Причина остановки работ (нарушение СИЗ, опасные условия труда и т.д.):");
-        if (!reason || !reason.trim()) return;
-        await mutateAndSave(function(){
-          startWorkStop(emp, reason.trim(), who.trim());
-        });
-        renderPersonalMinimal(document.getElementById("view-check"));
-      });
-      stopActionBox.appendChild(stopActionBtn);
-      panel.appendChild(stopActionBox);
-    }
-
-    var defectBox = document.createElement("div");
-    defectBox.className = "stop-work-box";
-    var defectBtn = document.createElement("button");
-    defectBtn.className = "btn";
-    defectBtn.style.width = "100%";
-    defectBtn.style.padding = "14px";
-    defectBtn.style.fontSize = "15px";
-    defectBtn.textContent = "🛠 Оформить дефектный акт (инструмент/СИЗ не пригоден к дальнейшему использованию)";
-    defectBtn.addEventListener("click", function(){ openDefectActWizard(dept, emp); });
-    defectBox.appendChild(defectBtn);
-    panel.appendChild(defectBox);
 
     root.appendChild(panel);
   }
