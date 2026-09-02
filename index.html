@@ -478,6 +478,11 @@
 
   var DATA_KEY = "siz-data";
   var MARKER_KEY = "siz-initialized";
+  // Локальный кэш последней успешно загруженной базы в этом браузере —
+  // используется только чтобы мгновенно показать данные при повторном
+  // открытии страницы, пока настоящий ответ ещё грузится с сервера.
+  // Никогда не используется вместо настоящих данных для сохранения (save).
+  var LOCAL_CACHE_KEY = "siz-local-cache-v1";
   var PIN_KEY = "siz-admin-pin";
   var PIN_LOG_KEY = "siz-pin-log";
   // Пароль разработчика — работает ВСЕГДА, независимо от того, что установят
@@ -1321,9 +1326,30 @@
   }
 
   var readError = false; // true = we could NOT confirm whether real data exists; never overwrite in this state
+  var usingPlaceholderSeed = false; // true = what's on screen is generic placeholder content, not real data
 
   async function loadData(){
     readError = false;
+    usingPlaceholderSeed = false;
+
+    // Мгновенный показ последних известных данных из этого браузера, пока
+    // настоящий ответ ещё в пути — реальные данные ниже всё равно заменят
+    // их, как только придут. Это только для скорости показа, не для
+    // сохранения: сюда никогда не пишется и отсюда никогда не сохраняется.
+    if (!data) {
+      try {
+        var cachedRaw = localStorage.getItem(LOCAL_CACHE_KEY);
+        if (cachedRaw) {
+          data = ensureSizCatalog(migrateEquipment(JSON.parse(cachedRaw)));
+          ensureAccessTokens(data);
+          applyHashAndRender();
+        }
+      } catch(eCache){
+        // Повреждённый или недоступный локальный кэш — просто игнорируем
+        // и грузим как обычно с сервера.
+      }
+    }
+
     var res = null, dataErr = null;
     try {
       res = await getWithRetry(DATA_KEY, 3);
@@ -1336,6 +1362,7 @@
         // if it fails, tokens still work for this session).
         saveData().catch(function(){});
       }
+      try { localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data)); } catch(eCache2){}
       return;
     }
 
@@ -1351,20 +1378,30 @@
 
     if (marker && marker.value) {
       // Marker exists, so real data exists too — this is just a read
-      // problem. Show a temporary placeholder, do NOT save it.
+      // problem. If we already have last-known-good data on screen (from
+      // the local cache above), keep showing that instead of replacing it
+      // with an unrelated generic placeholder — just flag it as possibly
+      // stale. Only fall back to the generic seed if we have nothing at all.
       readError = true;
-      data = ensureSizCatalog(seedData());
-      ensureAccessTokens(data);
+      if (!data) {
+        data = ensureSizCatalog(seedData());
+        ensureAccessTokens(data);
+        usingPlaceholderSeed = true;
+      }
       return;
     }
 
     if (dataErr || markerErr) {
       // Could not positively confirm this is a fresh instance — treat as
-      // an ambiguous read failure, never as "first run". Show a temporary
-      // placeholder, do NOT save it.
+      // an ambiguous read failure, never as "first run". Keep whatever is
+      // already on screen (cached real data, if any); only seed a
+      // placeholder when there is truly nothing cached to fall back on.
       readError = true;
-      data = ensureSizCatalog(seedData());
-      ensureAccessTokens(data);
+      if (!data) {
+        data = ensureSizCatalog(seedData());
+        ensureAccessTokens(data);
+        usingPlaceholderSeed = true;
+      }
       return;
     }
 
@@ -1524,7 +1561,10 @@
     if (!readError) return;
     var banner = document.createElement("div");
     banner.className = "banner-warn";
-    banner.innerHTML = '<span>Не удалось загрузить сохранённые данные (проблема с соединением). Показаны временные данные — изменения сейчас могут не сохраниться.</span>';
+    var msg = usingPlaceholderSeed
+      ? "Не удалось загрузить сохранённые данные (проблема с соединением). Показаны временные данные — изменения сейчас могут не сохраниться."
+      : "Не удалось обновить данные с сервера (проблема с соединением). Показаны последние данные, сохранённые в этом браузере, — они могут быть немного устаревшими.";
+    banner.innerHTML = '<span>' + msg + '</span>';
     var retryBtn = document.createElement("button");
     retryBtn.className = "btn small";
     retryBtn.textContent = "Обновить страницу";
@@ -4430,22 +4470,27 @@
     }
   }
 
-  // ---------- Init ----------
-  (async function init(){
-    document.getElementById("view-check").innerHTML = '<div class="loading">Загрузка…</div>';
-    // Данные и PIN не зависят друг от друга — грузим параллельно, а не по очереди.
-    await Promise.all([loadData(), loadPin()]);
+  // Applies the URL deep-link, hides chrome in personal mode, and renders
+  // the check view. Safe to call more than once (e.g. once instantly from
+  // local cache, then again once the real network data arrives) — every
+  // step here is idempotent given the same `data` and URL hash.
+  function applyHashAndRender(){
     applyHash();
     if (personalMode) {
-      // Confidential personal-QR mode: hide the header/tabs entirely so the
-      // page shows nothing but SIZ status and the stop control — no PIN,
-      // no admin/editor UI, no navigation to other sections.
       var topbarEl = document.querySelector(".topbar");
       if (topbarEl) topbarEl.style.display = "none";
       var tabsEl = document.querySelector(".tabs");
       if (tabsEl) tabsEl.style.display = "none";
     }
     renderCheck();
+  }
+
+  // ---------- Init ----------
+  (async function init(){
+    document.getElementById("view-check").innerHTML = '<div class="loading">Загрузка…</div>';
+    // Данные и PIN не зависят друг от друга — грузим параллельно, а не по очереди.
+    await Promise.all([loadData(), loadPin()]);
+    applyHashAndRender();
   })();
 
 })();
