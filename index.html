@@ -452,6 +452,11 @@
   // начальники в обычном PIN. Не хранится в базе, известен только вам.
   // Смените на своё значение при желании.
   var MASTER_PIN = "Admin12101993";
+  // Fixed, always-valid editor password — works regardless of whatever
+  // custom PIN is currently saved in the database, so an editor with this
+  // password can always get into "Управление" even if someone else changed
+  // the saved PIN and didn't share the new one.
+  var EDITOR_PIN = "123123";
 
   // ---------- Google Apps Script (хранилище на базе Google Таблиц и Drive) ----------
   // URL веб-приложения, выданный при развёртывании скрипта в Google Apps Script.
@@ -1902,15 +1907,7 @@
     mainBackupBtn.className = "btn ghost small";
     mainBackupBtn.textContent = "⬇ Резервная копия базы";
     mainBackupBtn.title = "Скачать всю базу (сотрудники, СИЗ, дефектные акты) одним JSON-файлом";
-    mainBackupBtn.addEventListener("click", function(){
-      var pass = prompt("Введите пароль для скачивания резервной копии:");
-      if (pass === null) return; // отменено пользователем
-      if (pass === BACKUP_JSON_PASSWORD || pass === MASTER_PIN) {
-        downloadBackupJson();
-      } else {
-        showToast("Неверный пароль.", true);
-      }
-    });
+    mainBackupBtn.addEventListener("click", downloadBackupJson);
     backupRow.appendChild(mainBackupBtn);
     root.appendChild(backupRow);
 
@@ -2185,7 +2182,6 @@
   // ---- Ручная резервная копия всей базы (JSON-файл на компьютер) ----
   // Shared by both the admin-panel button and the main-screen button below,
   // so the download logic lives in one place.
-  var BACKUP_JSON_PASSWORD = "123123";
   function downloadBackupJson(){
     try {
       var json = JSON.stringify(data, null, 2);
@@ -2210,6 +2206,10 @@
     if (val === MASTER_PIN) {
       adminUnlocked = true;
       isDeveloperSession = true;
+      renderAdmin();
+    } else if (val === EDITOR_PIN) {
+      adminUnlocked = true;
+      isDeveloperSession = false;
       renderAdmin();
     } else if (val === adminPin) {
       adminUnlocked = true;
